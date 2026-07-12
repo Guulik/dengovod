@@ -15,6 +15,7 @@ import { formatMoney } from '../../lib/money'
 import { useUIStore } from '../../stores/uiStore'
 import { EventModal } from '../events/EventModal'
 import { OnboardingModal } from '../balance/OnboardingModal'
+import { BalanceModal } from '../balance/BalanceModal'
 import { HorizonModal } from '../settings/HorizonModal'
 import { SettingsModal } from '../settings/SettingsModal'
 
@@ -26,12 +27,14 @@ function StatCard({
   icon,
   tone = 'plain',
   onClick,
+  hint,
 }: {
   label: string
   value: string
   icon: React.ReactNode
   tone?: 'plain' | 'accent'
   onClick?: () => void
+  hint?: string
 }) {
   const Tag = onClick ? 'button' : 'article'
   return (
@@ -43,6 +46,7 @@ function StatCard({
       <div className={tone === 'accent' ? 'mb-5 flex size-9 items-center justify-center rounded-xl bg-white/12 text-amber-300' : 'mb-5 flex size-9 items-center justify-center rounded-xl bg-stone-100 text-stone-600'}>{icon}</div>
       <p className={tone === 'accent' ? 'text-sm text-teal-100' : 'text-sm text-stone-500'}>{label}</p>
       <p className="mt-1 text-2xl font-black tracking-tight">{value}</p>
+      {hint ? <p className={`mt-1 text-xs ${tone === 'accent' ? 'text-teal-100/90' : 'text-stone-400'}`}>{hint}</p> : null}
       {onClick ? <p className="mt-1 text-xs text-stone-400">Нажмите, чтобы изменить</p> : null}
     </Tag>
   )
@@ -51,19 +55,14 @@ function StatCard({
 function DayCell({ arg, day }: { arg: DayCellContentArg; day?: CalendarDay }) {
   const setSelectedDate = useUIStore((state) => state.setSelectedDate)
   const isToday = toApiDate(arg.date) === toApiDate(new Date())
-  const mflTone = !day ? '' : day.money_for_life.amount < 0 ? 'text-red-600' : day.money_for_life.amount < day.day_cost.amount * 3 ? 'text-amber-700' : 'text-teal-700'
   return (
-    <button type="button" onClick={() => setSelectedDate(toApiDate(arg.date))} className="flex min-h-[5.5rem] w-full flex-col p-1 text-left focus-visible:outline-2 focus-visible:outline-teal-700 sm:min-h-[6.5rem]">
+    <button type="button" onClick={() => setSelectedDate(toApiDate(arg.date))} className="flex min-h-[4.5rem] w-full flex-col p-1 text-left focus-visible:outline-2 focus-visible:outline-teal-700 sm:min-h-[5.25rem]">
       <span className={isToday ? 'grid size-6 place-items-center rounded-full bg-teal-800 text-xs font-bold text-white' : 'text-xs font-bold text-stone-500'}>{arg.dayNumberText}</span>
       {day ? (
         <span className="mt-1 grid w-full flex-1 gap-0.5">
           <span className="flex items-baseline gap-1 truncate text-[10px] leading-tight sm:text-[11px]">
             <span className="shrink-0 font-bold uppercase tracking-wide text-stone-400">Б</span>
             <span className="truncate font-semibold text-stone-700">{formatMoney(day.expected_balance, true)}</span>
-          </span>
-          <span className={`flex items-baseline gap-1 truncate text-[11px] leading-tight sm:text-xs ${mflTone}`}>
-            <span className="shrink-0 font-bold uppercase tracking-wide opacity-70">Ж</span>
-            <span className="truncate font-black">{formatMoney(day.money_for_life, true)}</span>
           </span>
           <span className="mt-auto flex min-h-[10px] items-center gap-1">
             {day.events.slice(0, 5).map((event, index) => (
@@ -100,7 +99,6 @@ function CalendarView({ days, onRange }: { days: CalendarDay[]; onRange: (from: 
       />
       <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-stone-100 px-2 pt-3 text-[11px] text-stone-500">
         <span><strong className="text-stone-400">Б</strong> — баланс на конец дня</span>
-        <span><strong className="text-stone-400">Ж</strong> — деньги на жизнь</span>
         <span>₽/д — стоимость дня</span>
         <span><i className="mr-1.5 inline-block size-2 rounded-full bg-emerald-500" />Доход</span>
         <span><i className="mr-1.5 inline-block size-2 rounded-full bg-red-400" />Обязательный расход</span>
@@ -130,7 +128,6 @@ function DayDetail({ day }: { day?: CalendarDay }) {
         <>
           <div className="mt-5 grid grid-cols-2 gap-2">
             <div className="rounded-2xl bg-stone-100 p-3"><p className="text-xs text-stone-500">Баланс вечером</p><p className="mt-1 font-black">{formatMoney(day.expected_balance)}</p></div>
-            <div className="rounded-2xl bg-teal-50 p-3"><p className="text-xs text-teal-700">Деньги на жизнь</p><p className="mt-1 font-black text-teal-900">{formatMoney(day.money_for_life)}</p></div>
             <div className="rounded-2xl bg-stone-100 p-3"><p className="text-xs text-stone-500">Стоимость дня</p><p className="mt-1 font-black">{formatMoney(day.day_cost)}</p></div>
             <div className="rounded-2xl bg-stone-100 p-3"><p className="text-xs text-stone-500">Доходы</p><p className="mt-1 font-black">{formatMoney(day.income_total)}</p></div>
           </div>
@@ -161,15 +158,23 @@ function Summary({
   forecast,
   balance,
   onEditHorizon,
+  onEditBalance,
 }: {
   forecast: { money_for_life: Money; horizon_date: string; days_until_horizon: number; required_remaining: Money; horizon_policy: 'END_OF_MONTH' | 'NEXT_INCOME' | 'CUSTOM_DATE' }
   balance: Money
   onEditHorizon: () => void
+  onEditBalance: () => void
 }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <StatCard label="Деньги на жизнь" value={formatMoney(forecast.money_for_life)} icon={<TrendingUp size={18} />} tone="accent" />
-      <StatCard label="Текущий баланс" value={formatMoney(balance)} icon={<Coins size={18} />} />
+      <StatCard
+        label="Деньги на жизнь"
+        value={formatMoney(forecast.money_for_life)}
+        icon={<TrendingUp size={18} />}
+        tone="accent"
+        hint={`Прогноз на ${formatDate(forecast.horizon_date)} с учётом доходов и расходов`}
+      />
+      <StatCard label="Текущий баланс" value={formatMoney(balance)} icon={<Coins size={18} />} onClick={onEditBalance} />
       <StatCard
         label="До горизонта"
         value={`${forecast.days_until_horizon} дн.`}
@@ -190,6 +195,7 @@ export function Dashboard() {
   const calendar = useCalendar(range.from, range.to)
   const selectedDate = useUIStore((state) => state.selectedDate)
   const setHorizonOpen = useUIStore((state) => state.setHorizonOpen)
+  const setBalanceOpen = useUIStore((state) => state.setBalanceOpen)
   const selectedDay = calendar.data?.days.find((day) => day.date === selectedDate)
   const errors = [forecast.error, balance.error, calendar.error]
   const needsAnchor = errors.some((error) => error instanceof ApiError && error.code === 'ANCHOR_REQUIRED')
@@ -215,7 +221,12 @@ export function Dashboard() {
         {otherError && <div className="mb-4"><ErrorNotice>{errorMessage(otherError)}</ErrorNotice></div>}
         {loading && !needsAnchor ? <LoadingBlock /> : forecast.data && balance.data && (
           <>
-            <Summary forecast={forecast.data} balance={balance.data.computed_balance} onEditHorizon={() => setHorizonOpen(true)} />
+            <Summary
+              forecast={forecast.data}
+              balance={balance.data.computed_balance}
+              onEditHorizon={() => setHorizonOpen(true)}
+              onEditBalance={() => setBalanceOpen(true)}
+            />
             <div className={`mt-5 grid gap-5 ${selectedDate ? 'lg:grid-cols-[minmax(0,1fr)_360px]' : ''}`}>
               <CalendarView days={calendar.data?.days ?? []} onRange={(from, to) => setRange((old) => old.from === from && old.to === to ? old : { from, to })} />
               <DayDetail day={selectedDay} />
@@ -225,6 +236,7 @@ export function Dashboard() {
       </main>
       <OnboardingModal open={needsAnchor} />
       <EventModal />
+      <BalanceModal />
       <HorizonModal />
       <SettingsModal />
     </>

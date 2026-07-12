@@ -53,7 +53,7 @@ func TestCalculateBoundariesAndNecessity(t *testing.T) {
 		{
 			name:        "anchor day is unchanged but current day cost is reserved",
 			input:       baseInput("2026-07-10T09:00:00Z", "2026-07-10T08:00:00Z", 10_000, 1_000, domain.HorizonCustomDate, "2026-07-10"),
-			wantBalance: 10_000, wantMFL: 9_000, wantDayCost: 1_000, wantDays: 1,
+			wantBalance: 10_000, wantMFL: 10_000, wantDayCost: 1_000, wantDays: 1,
 		},
 		{
 			name: "next income date and income are excluded",
@@ -62,12 +62,12 @@ func TestCalculateBoundariesAndNecessity(t *testing.T) {
 				value.Events = []domain.FinancialEvent{event(domain.EventKindIncome, domain.NecessityRequired, 50_000, "2026-07-12")}
 				return value
 			}(),
-			wantBalance: 10_000, wantMFL: 8_000, wantDayCost: 2_000, wantDays: 2,
+			wantBalance: 10_000, wantMFL: 9_000, wantDayCost: 2_000, wantDays: 2,
 		},
 		{
 			name:        "end of month includes last day",
 			input:       baseInput("2026-07-30T09:00:00Z", "2026-07-30T08:00:00Z", 10_000, 1_000, domain.HorizonEndOfMonth, ""),
-			wantBalance: 10_000, wantMFL: 8_000, wantDayCost: 2_000, wantDays: 2,
+			wantBalance: 10_000, wantMFL: 9_000, wantDayCost: 2_000, wantDays: 2,
 		},
 		{
 			name: "required affects MFL optional is informational",
@@ -79,7 +79,7 @@ func TestCalculateBoundariesAndNecessity(t *testing.T) {
 				}
 				return value
 			}(),
-			wantBalance: 10_000, wantMFL: 8_000, wantRequired: 2_000, wantOptional: 3_000, wantDays: 1,
+			wantBalance: 10_000, wantMFL: 10_000, wantRequired: 2_000, wantOptional: 3_000, wantDays: 1,
 		},
 	}
 	for _, test := range tests {
@@ -91,6 +91,32 @@ func TestCalculateBoundariesAndNecessity(t *testing.T) {
 				t.Fatalf("unexpected summary: %+v", got)
 			}
 		})
+	}
+}
+
+func TestMoneyForLifeMatchesProjectedBalanceAtHorizon(t *testing.T) {
+	overrides := []domain.DayCostOverride{
+		{DateFrom: date("2026-07-14"), DateTo: date("2026-07-17"), DailyAmount: domain.Rub(50_000), CreatedAt: at("2026-07-12T00:00:00Z")},
+	}
+	input := Input{
+		Anchor:   domain.BalanceAnchor{Amount: domain.Rub(800_000), AnchoredAt: at("2026-07-12T10:00:00Z")},
+		Settings: domain.UserSettings{BaseDayCost: domain.Rub(140_000), HorizonPolicy: domain.HorizonCustomDate, HorizonCustomDate: func() *domain.CalendarDate { d := date("2026-07-17"); return &d }()},
+		Events: []domain.FinancialEvent{
+			event(domain.EventKindExpense, domain.NecessityRequired, 500_000, "2026-07-14"),
+			event(domain.EventKindIncome, domain.NecessityRequired, 500_000, "2026-07-14"),
+			event(domain.EventKindIncome, domain.NecessityRequired, 3_000_000, "2026-07-17"),
+			event(domain.EventKindExpense, domain.NecessityOptional, 3_000_000, "2026-07-17"),
+		},
+		Overrides: overrides,
+		RangeFrom: date("2026-07-12"), RangeTo: date("2026-07-17"), AsOf: at("2026-07-12T12:00:00Z"),
+	}
+	output := Calculate(input)
+	if output.Summary.MoneyForLife.Amount != 460_000 {
+		t.Fatalf("expected projected balance 460000 at horizon, got %+v", output.Summary.MoneyForLife)
+	}
+	day := output.Days[len(output.Days)-1]
+	if day.ExpectedBalance.Amount != 460_000 || day.Date.String() != "2026-07-17" {
+		t.Fatalf("unexpected horizon day: %+v", day)
 	}
 }
 

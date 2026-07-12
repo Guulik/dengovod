@@ -170,9 +170,15 @@ func Calculate(input Input) Output {
 	}
 	occurrences := ExpandEvents(input.Events, anchorDate, calcTo)
 
+	lastIncluded := horizon
+	if !horizonInclusive {
+		lastIncluded = horizon.AddDays(-1)
+	}
+
 	balance := input.Anchor.Amount.Amount
 	days := make([]domain.DayProjection, 0)
 	var currentBalance int64 = balance
+	var balanceAtHorizon int64 = balance
 	for d := anchorDate; !d.After(calcTo); d = d.AddDays(1) {
 		values := occurrences[d.String()]
 		cost := DayCost(d, input.Settings, input.Overrides).Amount
@@ -192,6 +198,9 @@ func Calculate(input Input) Output {
 		}
 		if d.String() == today.String() {
 			currentBalance = balance
+		}
+		if d.String() == lastIncluded.String() {
+			balanceAtHorizon = balance
 		}
 		if !d.Before(from) && !d.After(input.RangeTo) {
 			mfl := balance
@@ -230,10 +239,6 @@ func Calculate(input Input) Output {
 			}
 		}
 	}
-	lastIncluded := horizon
-	if !horizonInclusive {
-		lastIncluded = horizon.AddDays(-1)
-	}
 	daysUntil := 0
 	if !lastIncluded.Before(today) {
 		daysUntil = int(lastIncluded.Time().Sub(today.Time()).Hours()/24) + 1
@@ -242,7 +247,7 @@ func Calculate(input Input) Output {
 		Days: days,
 		Summary: domain.ForecastSummary{
 			CurrentBalance: domain.Rub(currentBalance),
-			MoneyForLife:   domain.Rub(currentBalance - requiredRemaining - dayCostRemaining),
+			MoneyForLife:   domain.Rub(balanceAtHorizon),
 			HorizonDate:    horizon, HorizonPolicy: input.Settings.HorizonPolicy,
 			RequiredRemaining: domain.Rub(requiredRemaining), DayCostRemaining: domain.Rub(dayCostRemaining),
 			OptionalRemaining: domain.Rub(optionalRemaining), DaysUntilHorizon: daysUntil,
