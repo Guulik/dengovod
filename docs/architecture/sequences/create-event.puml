@@ -1,0 +1,30 @@
+@startuml seq-create-event
+title POST /api/v1/events — Создание события
+
+actor User
+participant "Frontend" as FE
+participant "EventHandler" as Handler
+participant "EventService" as Svc
+participant "EventRepository" as Repo
+database "SQLite" as DB
+
+User -> FE : Заполняет форму события
+FE -> FE : Zod validation
+FE -> Handler : POST /api/v1/events\nAuthorization: Bearer token
+
+Handler -> Handler : Parse DTO
+Handler -> Handler : mapper.ToDomainEvent()
+Handler -> Svc : Create(ctx, event)
+
+Svc -> Svc : Validate invariants\n(amount > 0, recurrence valid)
+Svc -> Repo : Create(ctx, event)
+Repo -> DB : INSERT financial_events
+DB --> Repo : OK
+Repo --> Svc : nil
+Svc --> Handler : event
+Handler -> Handler : mapper.ToEventResponse()
+Handler --> FE : 201 EventResponse
+FE -> FE : invalidateQueries(['events', 'calendar'])
+FE --> User : Событие на календаре
+
+@enduml

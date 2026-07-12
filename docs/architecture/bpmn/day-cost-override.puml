@@ -1,0 +1,37 @@
+@startuml bpmn-day-cost-override
+title BPMN: Оверрайд стоимости дня (период)
+
+|User|
+start
+:Открывает Настройки\nили DayDetailPanel;
+
+|Frontend|
+:GET /api/v1/day-cost-overrides;
+
+|User|
+:Нажимает «Добавить период\nс другой стоимостью»;
+
+|Frontend|
+:Открыть OverrideFormModal;
+
+|User|
+:Заполняет:\n- date_from (01.08)\n- date_to (07.08)\n- daily_amount (300₽)\n- comment («У родителей»);
+
+|Frontend|
+:Zod validation;
+:POST /api/v1/day-cost-overrides;
+
+|Backend|
+:DayCostOverrideService.Create;
+:Check overlapping ranges\n(warn, don't block);
+:Save override;
+
+|Frontend|
+:invalidateQueries\n['day-cost-overrides',\n'calendar', 'forecast'];
+
+|User|
+:На календаре 1-7 августа\nday_cost = 300₽;
+:MFL пересчитан\nс учётом экономии;
+stop
+
+@enduml

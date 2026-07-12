@@ -1,0 +1,49 @@
+@startuml bpmn-create-recurring-event
+title BPMN: Создание повторяющегося события
+
+|User|
+start
+:Нажимает «+ Событие»;
+
+|Frontend|
+:Открыть EventFormModal;
+
+|User|
+:Заполняет сумму, категорию;
+:Включает «Повторять»;
+
+|Frontend|
+:Показать RecurrenceSelector;
+
+|User|
+if (Тип повторения?) then (Ежемесячно)
+  :Выбирает день месяца\n(например, 1-е);
+  |Frontend|
+  :recurrence.type = MONTHLY_ON_DAY\nrecurrence.day_of_month = 1;
+else (Каждые N дней)
+  :Вводит интервал\n(например, 14);
+  |Frontend|
+  :recurrence.type = EVERY_N_DAYS\nrecurrence.interval_days = 14;
+endif
+
+|User|
+:Опционально: дата окончания;
+
+|Frontend|
+:Zod validation;
+:POST /api/v1/events;
+
+|Backend|
+:EventService.Create;
+:Validate recurrence rule;
+:Save single row\n(не materialize occurrences);
+
+|Frontend|
+:invalidateQueries;
+:Календарь показывает\nвхождения на каждый день;
+
+|User|
+:Видит повторяющиеся\nсобытия на календаре;
+stop
+
+@enduml

@@ -1,0 +1,32 @@
+@startuml bpmn-open-app
+title BPMN: Открытие приложения
+
+|User|
+start
+:Открывает приложение;
+
+|Frontend|
+:Проверить token в localStorage;
+
+if (Token есть?) then (да)
+  :GET /api/v1/calendar (текущий месяц);
+  :GET /api/v1/forecast;
+else (нет)
+  :Показать экран входа;
+  |User|
+  :Вводит логин;
+  |Frontend|
+  :POST /api/v1/auth/login;
+  :Сохранить token;
+  :GET /api/v1/calendar;
+  :GET /api/v1/forecast;
+endif
+
+|Frontend|
+:Отобразить календарь\n+ виджет «Деньги на жизнь»;
+
+|User|
+:Видит текущий баланс\nи прогноз;
+stop
+
+@enduml

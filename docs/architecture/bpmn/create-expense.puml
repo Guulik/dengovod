@@ -1,0 +1,40 @@
+@startuml bpmn-create-expense
+title BPMN: Создание расхода
+
+|User|
+start
+:Нажимает «+ Расход»\nили клик на день;
+
+|Frontend|
+:Открыть EventFormModal;
+:React Hook Form + Zod;
+
+|User|
+:Заполняет:\n- сумма\n- дата\n- категория\n- обязательность\n- комментарий;
+
+|Frontend|
+:Client-side validation;
+
+if (Valid?) then (нет)
+  :Показать ошибки;
+  stop
+else (да)
+endif
+
+:POST /api/v1/events;
+
+|Backend|
+:EventService.Create;
+:Validate invariants;
+:Save to DB;
+
+|Frontend|
+:invalidateQueries\n['events', 'calendar', 'forecast'];
+:Закрыть модалку;
+:Обновить календарь;
+
+|User|
+:Видит новый расход на дне;
+stop
+
+@enduml

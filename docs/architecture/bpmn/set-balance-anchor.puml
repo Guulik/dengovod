@@ -1,0 +1,36 @@
+@startuml bpmn-set-balance-anchor
+title BPMN: Установка якоря баланса
+
+|User|
+start
+:Замечает расхождение\nплана и реальности;
+
+|Frontend|
+:Показать текущий\ncomputed balance;
+
+|User|
+:Нажимает «Обновить баланс»;
+
+|Frontend|
+:Открыть AnchorFormModal;
+:Предзаполнить текущей датой;
+
+|User|
+:Вводит актуальную сумму\n(например, 8000₽);
+
+|Frontend|
+:POST /api/v1/balance/anchor;
+
+|Backend|
+:BalanceService.SetAnchor;
+:INSERT balance_anchors;
+:Recalculate computed balance;
+
+|Frontend|
+:invalidateQueries\n['balance', 'calendar', 'forecast'];
+
+|User|
+:Видит актуальный баланс\nи пересчитанный MFL;
+stop
+
+@enduml

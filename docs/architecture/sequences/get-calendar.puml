@@ -1,0 +1,51 @@
+@startuml seq-get-calendar
+title GET /api/v1/calendar — Получение календаря
+
+actor User
+participant "Frontend" as FE
+participant "CalendarHandler" as Handler
+participant "CalendarService" as Svc
+participant "BalanceRepository" as BalRepo
+participant "SettingsRepository" as SetRepo
+participant "EventRepository" as EvRepo
+participant "DayCostOverrideRepository" as DcoRepo
+participant "ForecastEngine" as Engine
+database "SQLite" as DB
+
+User -> FE : Открывает календарь
+FE -> Handler : GET /api/v1/calendar?from=...&to=...
+
+Handler -> Svc : GetCalendar(ctx, userID, from, to)
+
+Svc -> BalRepo : GetLatestAnchor(userID)
+BalRepo -> DB : SELECT ... ORDER BY anchored_at DESC LIMIT 1
+DB --> BalRepo : anchor
+BalRepo --> Svc : anchor
+
+Svc -> SetRepo : GetByUserID(userID)
+SetRepo -> DB : SELECT user_settings
+DB --> SetRepo : settings
+SetRepo --> Svc : settings
+
+Svc -> EvRepo : ListByUser(userID)
+EvRepo -> DB : SELECT financial_events
+DB --> EvRepo : events[]
+EvRepo --> Svc : events[]
+
+Svc -> DcoRepo : ListByUser(userID)
+DcoRepo -> DB : SELECT day_cost_overrides
+DB --> DcoRepo : overrides[]
+DcoRepo --> Svc : overrides[]
+
+Svc -> Engine : Calculate(ForecastInput)
+Engine -> Engine : ExpandEvents()
+Engine -> Engine : ResolveHorizon()
+Engine -> Engine : Day-by-day balance + MFL
+Engine --> Svc : ForecastOutput
+
+Svc --> Handler : CalendarResponse domain
+Handler -> Handler : mapper.ToCalendarResponse()
+Handler --> FE : 200 CalendarResponse
+FE --> User : FullCalendar render
+
+@enduml

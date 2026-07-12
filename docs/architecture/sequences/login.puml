@@ -1,0 +1,40 @@
+@startuml seq-login
+title POST /api/v1/auth/login — Вход по логину
+
+actor User
+participant "Frontend" as FE
+participant "AuthHandler" as Handler
+participant "AuthService" as Svc
+participant "UserRepository" as UserRepo
+participant "SettingsRepository" as SetRepo
+participant "CategoryRepository" as CatRepo
+database "SQLite" as DB
+
+User -> FE : Вводит логин
+FE -> Handler : POST /api/v1/auth/login { login }
+
+Handler -> Svc : Login(ctx, login)
+Svc -> UserRepo : FindByLogin(login)
+UserRepo -> DB : SELECT users WHERE login=?
+
+alt Новый пользователь
+    DB --> UserRepo : not found
+    UserRepo --> Svc : ErrNotFound
+    Svc -> UserRepo : Create(user)
+    UserRepo -> DB : INSERT users
+    Svc -> SetRepo : Create(default settings)
+    SetRepo -> DB : INSERT user_settings
+    Svc -> CatRepo : CreateDefaults(userID)
+    CatRepo -> DB : INSERT categories (batch)
+else Существующий
+    DB --> UserRepo : user
+    UserRepo --> Svc : user
+end
+
+Svc -> Svc : Generate token
+Svc --> Handler : LoginResponse
+Handler --> FE : 200 { user, token }
+FE -> FE : store token (localStorage)
+FE --> User : Redirect to calendar
+
+@enduml

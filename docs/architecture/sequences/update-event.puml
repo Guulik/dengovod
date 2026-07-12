@@ -1,0 +1,33 @@
+@startuml seq-update-event
+title PUT /api/v1/events/{id} — Изменение события (вся серия)
+
+actor User
+participant "Frontend" as FE
+participant "EventHandler" as Handler
+participant "EventService" as Svc
+participant "EventRepository" as Repo
+database "SQLite" as DB
+
+User -> FE : Редактирует событие
+FE -> Handler : PUT /api/v1/events/{id}
+
+Handler -> Handler : Parse + map DTO
+Handler -> Svc : Update(ctx, eventID, patch)
+
+Svc -> Repo : GetByID(userID, eventID)
+Repo -> DB : SELECT ...
+DB --> Repo : existing
+Repo --> Svc : existing
+
+Svc -> Svc : Merge + validate
+Svc -> Repo : Update(ctx, event)
+Repo -> DB : UPDATE financial_events
+DB --> Repo : OK
+Repo --> Svc : nil
+
+Svc --> Handler : updated event
+Handler --> FE : 200 EventResponse
+FE -> FE : invalidateQueries(['events', 'calendar', 'forecast'])
+FE --> User : Обновлённый календарь
+
+@enduml

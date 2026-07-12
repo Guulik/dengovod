@@ -1,0 +1,45 @@
+@startuml seq-get-forecast
+title GET /api/v1/forecast — Получение прогноза (Money for Life)
+
+actor User
+participant "Frontend" as FE
+participant "ForecastHandler" as Handler
+participant "ForecastService" as Svc
+participant "BalanceRepository" as BalRepo
+participant "SettingsRepository" as SetRepo
+participant "EventRepository" as EvRepo
+participant "DayCostOverrideRepository" as DcoRepo
+participant "ForecastEngine" as Engine
+database "SQLite" as DB
+
+User -> FE : Смотрит виджет «Деньги на жизнь»
+FE -> Handler : GET /api/v1/forecast
+
+Handler -> Svc : GetForecast(ctx, userID)
+
+Svc -> BalRepo : GetLatestAnchor(userID)
+BalRepo -> DB : SELECT ...
+DB --> BalRepo : anchor
+BalRepo --> Svc : anchor
+
+Svc -> SetRepo : GetByUserID(userID)
+SetRepo -> DB : SELECT ...
+SetRepo --> Svc : settings
+
+Svc -> EvRepo : ListByUser(userID)
+EvRepo -> DB : SELECT ...
+EvRepo --> Svc : events[]
+
+Svc -> DcoRepo : ListByUser(userID)
+DcoRepo -> DB : SELECT ...
+DcoRepo --> Svc : overrides[]
+
+Svc -> Engine : Calculate(input, range=today..horizon)
+Engine -> Engine : Compute ForecastSummary
+Engine --> Svc : summary
+
+Svc --> Handler : ForecastSummary
+Handler --> FE : 200 ForecastSummaryDTO
+FE --> User : «Осталось X ₽ на жизнь»
+
+@enduml

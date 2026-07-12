@@ -1,0 +1,28 @@
+@startuml bpmn-change-day-cost
+title BPMN: Изменение базовой стоимости дня
+
+|User|
+start
+:Открывает Настройки;
+
+|Frontend|
+:GET /api/v1/settings;
+
+|User|
+:Изменяет «Стоимость дня»\n(например, 1400 → 1500);
+
+|Frontend|
+:PUT /api/v1/settings;
+
+|Backend|
+:SettingsService.Update;
+:Save base_day_cost;
+
+|Frontend|
+:invalidateQueries\n['settings', 'calendar', 'forecast'];
+
+|User|
+:Видит пересчитанный\nMFL и балансы по дням;
+stop
+
+@enduml

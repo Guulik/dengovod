@@ -1,0 +1,30 @@
+@startuml seq-delete-event
+title DELETE /api/v1/events/{id} — Удаление события
+
+actor User
+participant "Frontend" as FE
+participant "EventHandler" as Handler
+participant "EventService" as Svc
+participant "EventRepository" as Repo
+database "SQLite" as DB
+
+User -> FE : Удаляет событие
+FE -> Handler : DELETE /api/v1/events/{id}
+
+Handler -> Svc : Delete(ctx, userID, eventID)
+Svc -> Repo : GetByID(userID, eventID)
+Repo -> DB : SELECT ...
+DB --> Repo : event
+Repo --> Svc : event
+
+Svc -> Repo : Delete(ctx, userID, eventID)
+Repo -> DB : DELETE financial_events WHERE id=?
+DB --> Repo : OK
+Repo --> Svc : nil
+
+Svc --> Handler : nil
+Handler --> FE : 204 No Content
+FE -> FE : invalidateQueries(['events', 'calendar', 'forecast'])
+FE --> User : Событие исчезло
+
+@enduml

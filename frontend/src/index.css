@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #1c1917;
+  background: #f4f1e9;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100svh;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.money-calendar {
+  --fc-border-color: #e7e5e4;
+  --fc-button-bg-color: #fff;
+  --fc-button-border-color: #e7e5e4;
+  --fc-button-text-color: #44403c;
+  --fc-button-hover-bg-color: #f5f5f4;
+  --fc-button-hover-border-color: #d6d3d1;
+  --fc-button-active-bg-color: #0f766e;
+  --fc-button-active-border-color: #0f766e;
+  --fc-today-bg-color: #f0fdfa;
+  --fc-page-bg-color: transparent;
+  --fc-neutral-bg-color: #fafaf9;
+}
+
+.money-calendar .fc .fc-toolbar {
+  margin: .25rem .25rem 1rem;
+  gap: .75rem;
+}
+
+.money-calendar .fc .fc-toolbar-title {
+  color: #1c1917;
+  font-size: 1.15rem;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.money-calendar .fc .fc-button {
+  border-radius: .75rem;
+  box-shadow: none;
+  font-size: .78rem;
+  font-weight: 650;
+  padding: .5rem .65rem;
+}
+
+.money-calendar .fc .fc-col-header-cell-cushion {
+  padding: .55rem .25rem;
+  color: #78716c;
+  font-size: .7rem;
+  font-weight: 700;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.money-calendar .fc .fc-daygrid-day-frame {
+  min-height: 6rem;
+}
+
+.money-calendar .fc .fc-daygrid-day-top,
+.money-calendar .fc .fc-daygrid-day-events {
+  display: none;
+}
+
+.money-calendar .fc .fc-day-other {
+  background: #fafaf9;
+  opacity: .55;
+}
+
+.money-calendar .fc-theme-standard td:last-child,
+.money-calendar .fc-theme-standard th:last-child {
+  border-right: 0;
+}
+
+@media (max-width: 640px) {
+  .money-calendar .fc .fc-toolbar {
+    align-items: flex-start;
+  }
+
+  .money-calendar .fc .fc-toolbar-title {
+    font-size: 1rem;
+  }
+
+  .money-calendar .fc .fc-today-button {
+    display: none;
+  }
+
+  .money-calendar .fc .fc-daygrid-day-frame {
+    min-height: 5.5rem;
+  }
+}

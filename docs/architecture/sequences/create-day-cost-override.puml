@@ -1,0 +1,33 @@
+@startuml seq-create-day-cost-override
+title POST /api/v1/day-cost-overrides — Оверрайд стоимости дня
+
+actor User
+participant "Frontend" as FE
+participant "DayCostOverrideHandler" as Handler
+participant "DayCostOverrideService" as Svc
+participant "DayCostOverrideRepository" as Repo
+database "SQLite" as DB
+
+User -> FE : «Неделя у родителей — 300₽/день»
+FE -> Handler : POST /api/v1/day-cost-overrides
+
+Handler -> Handler : Map DTO
+Handler -> Svc : Create(ctx, override)
+
+Svc -> Svc : Validate date_from <= date_to
+Svc -> Repo : ListOverlapping(userID, from, to)
+Repo -> DB : SELECT ... WHERE ranges overlap
+DB --> Repo : existing[]
+Repo --> Svc : existing[]
+
+Svc -> Svc : Warn if overlap (log, don't block)
+Svc -> Repo : Create(ctx, override)
+Repo -> DB : INSERT day_cost_overrides
+DB --> Repo : OK
+
+Svc --> Handler : override
+Handler --> FE : 201 OverrideResponse
+FE -> FE : invalidateQueries(['calendar', 'forecast'])
+FE --> User : Календарь пересчитан
+
+@enduml

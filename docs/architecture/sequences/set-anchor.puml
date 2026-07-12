@@ -1,0 +1,37 @@
+@startuml seq-set-anchor
+title POST /api/v1/balance/anchor — Установка якоря баланса
+
+actor User
+participant "Frontend" as FE
+participant "BalanceHandler" as Handler
+participant "BalanceService" as Svc
+participant "BalanceRepository" as Repo
+participant "ForecastEngine" as Engine
+database "SQLite" as DB
+
+User -> FE : «У меня сейчас 8000 ₽»
+FE -> Handler : POST /api/v1/balance/anchor\n{ amount, anchored_at }
+
+Handler -> Handler : Map DTO → domain.BalanceAnchor
+Handler -> Svc : SetAnchor(ctx, userID, anchor)
+
+Svc -> Svc : Validate amount >= 0
+Svc -> Repo : CreateAnchor(ctx, anchor)
+Repo -> DB : INSERT balance_anchors
+DB --> Repo : OK
+Repo --> Svc : nil
+
+Svc -> Repo : GetLatestAnchor(userID)
+Repo -> DB : SELECT ... ORDER BY anchored_at DESC
+DB --> Repo : latest
+Repo --> Svc : anchor
+
+Svc -> Engine : Calculate(...) для computed balance
+Engine --> Svc : balance state
+
+Svc --> Handler : BalanceState
+Handler --> FE : 201 BalanceStateDTO
+FE -> FE : invalidateQueries(['balance', 'calendar', 'forecast'])
+FE --> User : Обновлённый баланс
+
+@enduml

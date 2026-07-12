@@ -1,0 +1,39 @@
+@startuml bpmn-view-calendar
+title BPMN: Просмотр календаря
+
+|User|
+start
+:Открывает календарь;
+
+|Frontend|
+:Определить видимый диапазон\n(месяц / неделя);
+
+:GET /api/v1/calendar?from&to;
+
+|Backend|
+:CalendarService.GetCalendar;
+:ForecastEngine.Calculate;
+:Вернуть days[] + summary;
+
+|Frontend|
+:FullCalendar.render(events);
+:Для каждого дня показать:\n- expected_balance\n- day_cost\n- money_for_life\n- events;
+
+|User|
+if (Клик на день?) then (да)
+  :Открыть DayDetailPanel;
+  :Показать список событий дня;
+else (нет)
+  :Продолжить просмотр;
+endif
+
+|User|
+if (Смена месяца?) then (да)
+  |Frontend|
+  :Запросить новый диапазон;
+  detach
+else (нет)
+  stop
+endif
+
+@enduml
