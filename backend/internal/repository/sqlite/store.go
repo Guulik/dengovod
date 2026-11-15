@@ -39,11 +39,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	sqlBytes, err := migrations.ReadFile("migrations/001_initial.sql")
-	if err == nil {
-		_, err = db.Exec(string(sqlBytes))
-	}
-	if err != nil {
+	if err = applyMigrations(context.Background(), db, migrations); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply migrations: %w", err)
 	}
@@ -90,8 +86,12 @@ func (s *Store) ProvisionUser(ctx context.Context, login string) (domain.User, e
 		{"Прочее", domain.EventKindIncome},
 	}
 	for _, item := range defaults {
-		if _, err = tx.ExecContext(ctx, `INSERT INTO categories(id,user_id,name,kind,is_default,created_at) VALUES(?,?,?,?,1,?)`,
-			uuid.New(), user.ID, item.name, item.kind, now); err != nil {
+		var systemCode any
+		if item.name == "Зарплата" && item.kind == domain.EventKindIncome {
+			systemCode = domain.CategorySystemSalary
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO categories(id,user_id,name,kind,is_default,created_at,system_code) VALUES(?,?,?,?,1,?,?)`,
+			uuid.New(), user.ID, item.name, item.kind, now, systemCode); err != nil {
 			return domain.User{}, err
 		}
 	}
@@ -316,7 +316,7 @@ func (s *Store) ListOverrides(ctx context.Context, userID uuid.UUID) ([]domain.D
 }
 
 func (s *Store) ListCategories(ctx context.Context, userID uuid.UUID) ([]domain.Category, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,user_id,name,kind,is_default,created_at FROM categories WHERE user_id=? ORDER BY kind,name`, userID)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,user_id,name,kind,is_default,created_at,system_code FROM categories WHERE user_id=? ORDER BY kind,name`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +324,7 @@ func (s *Store) ListCategories(ctx context.Context, userID uuid.UUID) ([]domain.
 	values := []domain.Category{}
 	for rows.Next() {
 		var value domain.Category
-		if err = rows.Scan(&value.ID, &value.UserID, &value.Name, &value.Kind, &value.IsDefault, &value.CreatedAt); err != nil {
+		if err = rows.Scan(&value.ID, &value.UserID, &value.Name, &value.Kind, &value.IsDefault, &value.CreatedAt, &value.SystemCode); err != nil {
 			return nil, err
 		}
 		values = append(values, value)
