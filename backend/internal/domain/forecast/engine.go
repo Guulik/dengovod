@@ -151,15 +151,20 @@ func nextOccurrence(rule domain.RecurrenceRule, from domain.CalendarDate) (domai
 	return result, true
 }
 
+func earliestEventDate(events []domain.FinancialEvent, fallback domain.CalendarDate) domain.CalendarDate {
+	earliest := fallback
+	for _, event := range events {
+		if event.Recurrence.StartDate.Before(earliest) {
+			earliest = event.Recurrence.StartDate
+		}
+	}
+	return earliest
+}
+
 func Calculate(input Input) Output {
 	today := domain.DateFromTime(input.AsOf)
 	anchorDate := domain.DateFromTime(input.Anchor.AnchoredAt)
 	from := input.RangeFrom
-	if from.Before(anchorDate) {
-		// Balance before an anchor is unknowable. We intentionally return projections only
-		// from max(requestedFrom, anchorDate), instead of inventing nullable balances.
-		from = anchorDate
-	}
 	horizon, horizonInclusive := ResolveHorizon(input.Settings, input.Events, today)
 	calcTo := input.RangeTo
 	if horizon.After(calcTo) {
@@ -168,7 +173,17 @@ func Calculate(input Input) Output {
 	if today.After(calcTo) {
 		calcTo = today
 	}
-	occurrences := ExpandEvents(input.Events, anchorDate, calcTo)
+	// Anchor is the starting amount. Walk from the earliest of (requested range,
+	// anchor day, logged operations) so pre-anchor income/expense still adjusts
+	// the computed balance and past calendar days remain editable.
+	loopStart := earliestEventDate(input.Events, anchorDate)
+	if anchorDate.Before(loopStart) {
+		loopStart = anchorDate
+	}
+	if from.Before(loopStart) {
+		loopStart = from
+	}
+	occurrences := ExpandEvents(input.Events, loopStart, calcTo)
 
 	lastIncluded := horizon
 	if !horizonInclusive {
@@ -179,7 +194,7 @@ func Calculate(input Input) Output {
 	days := make([]domain.DayProjection, 0)
 	var currentBalance int64 = balance
 	var balanceAtHorizon int64 = balance
-	for d := anchorDate; !d.After(calcTo); d = d.AddDays(1) {
+	for d := loopStart; !d.After(calcTo); d = d.AddDays(1) {
 		values := occurrences[d.String()]
 		cost := DayCost(d, input.Settings, input.Overrides).Amount
 		var income, required, optional int64
@@ -192,9 +207,11 @@ func Calculate(input Input) Output {
 				required += occurrence.Amount.Amount
 			}
 		}
-		// The anchor amount already includes all activity on its Moscow calendar date.
+		// Events always adjust the running balance. Day cost starts the calendar
+		// day after the anchor so the starting point is not double-charged.
+		balance += income - required - optional
 		if d.After(anchorDate) {
-			balance += income - required - optional - cost
+			balance -= cost
 		}
 		if d.String() == today.String() {
 			currentBalance = balance

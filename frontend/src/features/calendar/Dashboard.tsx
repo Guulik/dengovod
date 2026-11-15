@@ -124,32 +124,29 @@ function DayDetail({ day }: { day?: CalendarDay }) {
         </div>
         <Button variant="ghost" className="size-9 p-0" aria-label="Закрыть" onClick={() => setSelectedDate(null)}><X size={18} /></Button>
       </div>
-      {!day ? <p className="mt-6 text-sm text-stone-500">Нет расчёта для этой даты.</p> : (
-        <>
-          <div className="mt-5 grid grid-cols-2 gap-2">
-            <div className="rounded-2xl bg-stone-100 p-3"><p className="text-xs text-stone-500">Баланс вечером</p><p className="mt-1 font-black">{formatMoney(day.expected_balance)}</p></div>
-            <div className="rounded-2xl bg-stone-100 p-3"><p className="text-xs text-stone-500">Стоимость дня</p><p className="mt-1 font-black">{formatMoney(day.day_cost)}</p></div>
-            <div className="rounded-2xl bg-stone-100 p-3"><p className="text-xs text-stone-500">Доходы</p><p className="mt-1 font-black">{formatMoney(day.income_total)}</p></div>
-          </div>
-          <div className="mt-6 flex items-center justify-between">
-            <h3 className="font-bold">События</h3>
-            <Button variant="secondary" className="min-h-9 px-3 py-1" onClick={() => openEvent()}><Plus size={15} />Добавить</Button>
-          </div>
-          <div className="mt-3 grid gap-2">
-            {day.events.length === 0 && <p className="rounded-2xl border border-dashed border-stone-300 p-5 text-center text-sm text-stone-500">На этот день событий нет</p>}
-            {day.events.map((occurrence, index) => {
-              const source = events?.events.find((event) => event.id === occurrence.event_id)
-              return (
-                <button key={`${occurrence.event_id}-${index}`} type="button" onClick={() => openEvent(occurrence.event_id)} className="flex w-full items-center gap-3 rounded-2xl border border-stone-200 bg-white p-3 text-left transition hover:border-stone-300">
-                  <span className={`grid size-9 shrink-0 place-items-center rounded-xl ${occurrence.kind === 'INCOME' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}`}>{occurrence.kind === 'INCOME' ? <CircleArrowDown size={18} /> : <CircleArrowUp size={18} />}</span>
-                  <span className="min-w-0 flex-1"><span className="block truncate text-sm font-bold">{occurrence.comment || source?.comment || 'Без комментария'}</span><span className="text-xs text-stone-500">{occurrence.necessity === 'OPTIONAL' ? 'Необязательное' : 'Обязательное'}</span></span>
-                  <strong className={occurrence.kind === 'INCOME' ? 'text-emerald-700' : 'text-stone-900'}>{occurrence.kind === 'INCOME' ? '+' : '−'}{formatMoney(occurrence.amount)}</strong>
-                </button>
-              )
-            })}
-          </div>
-        </>
-      )}
+      <div className="mt-5 grid grid-cols-2 gap-2">
+        <div className="rounded-2xl bg-stone-100 p-3"><p className="text-xs text-stone-500">Баланс вечером</p><p className="mt-1 font-black">{day ? formatMoney(day.expected_balance) : '—'}</p></div>
+        <div className="rounded-2xl bg-stone-100 p-3"><p className="text-xs text-stone-500">Стоимость дня</p><p className="mt-1 font-black">{day ? formatMoney(day.day_cost) : '—'}</p></div>
+        <div className="rounded-2xl bg-stone-100 p-3"><p className="text-xs text-stone-500">Доходы</p><p className="mt-1 font-black">{day ? formatMoney(day.income_total) : '—'}</p></div>
+      </div>
+      <div className="mt-6 flex items-center justify-between">
+        <h3 className="font-bold">События</h3>
+        <Button variant="secondary" className="min-h-9 px-3 py-1" onClick={() => openEvent()}><Plus size={15} />Добавить</Button>
+      </div>
+      <div className="mt-3 grid gap-2">
+        {!day && <p className="rounded-2xl border border-dashed border-stone-300 p-5 text-center text-sm text-stone-500">Нет расчёта для этой даты — операцию всё равно можно добавить</p>}
+        {day && day.events.length === 0 && <p className="rounded-2xl border border-dashed border-stone-300 p-5 text-center text-sm text-stone-500">На этот день событий нет</p>}
+        {(day?.events ?? []).map((occurrence, index) => {
+          const source = events?.events.find((event) => event.id === occurrence.event_id)
+          return (
+            <button key={`${occurrence.event_id}-${index}`} type="button" onClick={() => openEvent(occurrence.event_id)} className="flex w-full items-center gap-3 rounded-2xl border border-stone-200 bg-white p-3 text-left transition hover:border-stone-300">
+              <span className={`grid size-9 shrink-0 place-items-center rounded-xl ${occurrence.kind === 'INCOME' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}`}>{occurrence.kind === 'INCOME' ? <CircleArrowDown size={18} /> : <CircleArrowUp size={18} />}</span>
+              <span className="min-w-0 flex-1"><span className="block truncate text-sm font-bold">{occurrence.comment || source?.comment || 'Без комментария'}</span><span className="text-xs text-stone-500">{occurrence.necessity === 'OPTIONAL' ? 'Необязательное' : 'Обязательное'}</span></span>
+              <strong className={occurrence.kind === 'INCOME' ? 'text-emerald-700' : 'text-stone-900'}>{occurrence.kind === 'INCOME' ? '+' : '−'}{formatMoney(occurrence.amount)}</strong>
+            </button>
+          )
+        })}
+      </div>
     </aside>
   )
 }
