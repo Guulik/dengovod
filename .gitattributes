@@ -1,0 +1,2 @@
+# Embedded migrations must have identical bytes on Windows and Unix builds.
+backend/internal/repository/sqlite/migrations/*.sql text eol=lf

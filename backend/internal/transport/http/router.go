@@ -442,7 +442,7 @@ func (h *handler) listCategories(w http.ResponseWriter, r *http.Request) {
 	items := []any{}
 	for _, value := range values {
 		if kind := r.URL.Query().Get("kind"); kind == "" || kind == string(value.Kind) {
-			items = append(items, map[string]any{"id": value.ID, "name": value.Name, "kind": value.Kind, "is_default": value.IsDefault})
+			items = append(items, map[string]any{"id": value.ID, "name": value.Name, "kind": value.Kind, "is_default": value.IsDefault, "system_code": value.SystemCode})
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"categories": items})
