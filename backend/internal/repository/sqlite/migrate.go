@@ -40,7 +40,8 @@ func loadMigrations(source fs.FS) ([]migration, error) {
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, migration{version, entry.Name(), string(script), fmt.Sprintf("%x", sha256.Sum256(script))})
+		canonical := strings.ReplaceAll(string(script), "\r\n", "\n")
+		result = append(result, migration{version, entry.Name(), canonical, fmt.Sprintf("%x", sha256.Sum256([]byte(canonical)))})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].version < result[j].version })
 	if len(result) == 0 {
@@ -130,7 +131,7 @@ type schemaReader interface {
 
 func schemaDefinition(ctx context.Context, db schemaReader) ([]string, error) {
 	rows, err := db.QueryContext(ctx, `SELECT type,name,sql FROM sqlite_schema
-        WHERE name NOT LIKE 'sqlite_%' AND name <> 'schema_migrations' ORDER BY type,name`)
+        WHERE name NOT GLOB 'sqlite_*' AND name <> 'schema_migrations' ORDER BY type,name`)
 	if err != nil {
 		return nil, err
 	}

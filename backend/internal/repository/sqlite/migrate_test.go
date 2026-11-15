@@ -86,9 +86,9 @@ INSERT INTO event_occurrence_overrides VALUES ('occurrence','event','2026-08-10'
 INSERT INTO actual_transactions VALUES ('actual','11111111-1111-1111-1111-111111111111','INCOME',123456,'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','2026-07-10','received','event','2026-07-10T09:00:00Z');
 `)
 	queries := []string{
-		`SELECT * FROM users ORDER BY id`, `SELECT * FROM settings ORDER BY user_id`,
+		`SELECT * FROM users ORDER BY id`, `SELECT user_id,base_day_cost,horizon_policy,horizon_custom_date,currency,updated_at FROM settings ORDER BY user_id`,
 		`SELECT id,user_id,name,kind,is_default,created_at FROM categories ORDER BY id`,
-		`SELECT * FROM anchors ORDER BY id`, `SELECT * FROM financial_events ORDER BY id`,
+		`SELECT id,user_id,amount,anchored_at,created_at FROM anchors ORDER BY id`, `SELECT id,user_id,kind,necessity,amount,category_id,comment,recurrence_type,start_date,day_of_month,interval_days,until_date,cron_expr,created_at,updated_at FROM financial_events ORDER BY id`,
 		`SELECT * FROM day_cost_overrides ORDER BY id`, `SELECT * FROM event_occurrence_overrides ORDER BY id`,
 		`SELECT * FROM actual_transactions ORDER BY id`,
 	}
@@ -201,6 +201,7 @@ func TestUnknownLegacySchemaIsRejectedWithoutMutation(t *testing.T) {
 	for _, setup := range []string{
 		`CREATE TABLE users(id TEXT PRIMARY KEY); INSERT INTO users VALUES('keep');`,
 		`CREATE TABLE unrelated(value TEXT); INSERT INTO unrelated VALUES('keep');`,
+		`CREATE TABLE sqlitex_backup(value TEXT); INSERT INTO sqlitex_backup VALUES('keep');`,
 	} {
 		t.Run(setup, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "unknown.db")
@@ -227,7 +228,7 @@ func TestMigrationHistoryMustMatchBinary(t *testing.T) {
 		`UPDATE schema_migrations SET checksum='modified' WHERE version=1`,
 		`UPDATE schema_migrations SET name='renamed.sql' WHERE version=1`,
 		`DELETE FROM schema_migrations WHERE version=1`,
-		`INSERT INTO schema_migrations(version,name,checksum) VALUES(3,'003_future.sql','unknown')`,
+		`INSERT INTO schema_migrations(version,name,checksum) VALUES(999,'999_future.sql','unknown')`,
 	} {
 		t.Run(corrupt, func(t *testing.T) {
 			store, err := Open(filepath.Join(t.TempDir(), "history.db"))
@@ -265,5 +266,28 @@ func TestMigrationFilesMustBeConsecutive(t *testing.T) {
 				t.Fatalf("invalid sequence modified schema: %v", got)
 			}
 		})
+	}
+}
+
+func TestMigrationChecksumIsPortableAcrossLineEndings(t *testing.T) {
+	path := filepath.Join(t.TempDir(),"portable.db")
+	lf:=fstest.MapFS{
+		"migrations/001_initial.sql":{Data:[]byte("CREATE TABLE values_to_keep(value INTEGER);\nINSERT INTO values_to_keep VALUES(42);\n")},
+		"migrations/002_next.sql":{Data:[]byte("ALTER TABLE values_to_keep ADD COLUMN note TEXT;\nUPDATE values_to_keep SET note='keep';\n")},
+	}
+	crlf:=fstest.MapFS{}
+	for name,file:=range lf{crlf[name]=&fstest.MapFile{Data:[]byte(strings.ReplaceAll(string(file.Data),"\n","\r\n"))}}
+	for _,first:=range []fs.FS{lf,crlf}{
+		db:=migrationDB(t,path)
+		if err:=applyMigrations(context.Background(),db,first);err!=nil{t.Fatal(err)}
+		before:=snapshot(t,db,`SELECT * FROM schema_migrations ORDER BY version`)
+		if err:=db.Close();err!=nil{t.Fatal(err)}
+		db=migrationDB(t,path)
+		for _,source:=range []fs.FS{crlf,lf}{
+			if err:=applyMigrations(context.Background(),db,source);err!=nil{t.Fatal(err)}
+			if got:=snapshot(t,db,`SELECT * FROM schema_migrations ORDER BY version`);!reflect.DeepEqual(got,before){t.Fatalf("line ending change rewrote history: %v -> %v",before,got)}
+			if got:=snapshot(t,db,`SELECT * FROM values_to_keep`);!reflect.DeepEqual(got,[]string{`[]interface {}{42, "keep"}`}){t.Fatalf("data changed: %v",got)}
+		}
+		if err:=db.Close();err!=nil{t.Fatal(err)}
 	}
 }
