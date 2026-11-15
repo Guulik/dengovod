@@ -500,7 +500,7 @@ func CalculateContext(ctx context.Context, input Input) (Output, error) {
 		if day.projection.ExpectedBalance == nil {
 			break
 		}
-		if i == historyCount-1 && historyTo.Before(today.AddDays(-1)) && d.Before(last) {
+		if !suffix.reset && i == historyCount-1 && historyTo.Before(today.AddDays(-1)) && d.Before(last) {
 			gapTo := today.AddDays(-1)
 			if last.Before(gapTo) {
 				gapTo = last

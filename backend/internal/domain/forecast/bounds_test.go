@@ -100,6 +100,32 @@ func TestSparseHistoricalGapMatchesContiguousCalculation(t *testing.T) {
 	}
 }
 
+func TestSparseGapBeforeSuffixResetDoesNotOverflowDiscardedReserve(t *testing.T) {
+	input := baseInput("2026-07-11T12:00:00Z", "2026-07-01T08:00:00Z", 10000, 0, domain.HorizonCustomDate, "2026-07-11")
+	input.RangeFrom, input.RangeTo = date("2026-07-01"), date("2026-07-11")
+	input.Anchors = []domain.BalanceAnchor{input.Anchor, {
+		ID: uuid.New(), Amount: domain.Rub(20000), AnchoredAt: at("2026-07-11T08:00:00Z"), Sequence: 1,
+	}}
+	input.Overrides = []domain.DayCostOverride{{
+		ID: uuid.New(), DateFrom: date("2026-07-02"), DateTo: date("2026-07-10"), DailyAmount: domain.Rub(domain.MaxMoney),
+	}}
+	full, err := CalculateContext(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.RangeTo = input.RangeFrom
+	short, err := CalculateContext(context.Background(), input)
+	if err != nil {
+		t.Fatalf("discarded reserve before later anchor must not overflow: %v", err)
+	}
+	if len(short.Days) != 1 || short.Days[0].ExpectedBalance.Amount != 10000 || short.Days[0].MoneyForLife.Amount != 20000 {
+		t.Fatalf("unexpected short historical projection: %+v", short.Days)
+	}
+	if *short.Days[0].ExpectedBalance != *full.Days[0].ExpectedBalance || *short.Days[0].MoneyForLife != *full.Days[0].MoneyForLife || *short.Summary != *full.Summary {
+		t.Fatalf("short and contiguous ranges disagree: short=%+v full=%+v", short, full)
+	}
+}
+
 func TestNextIncomeAndCustomForecastStayWithin3660Days(t *testing.T) {
 	input := baseInput("2026-07-11T12:00:00Z", "2026-07-11T08:00:00Z", 10000, 0, domain.HorizonNextIncome, "")
 	input.Events = []domain.FinancialEvent{event(domain.EventKindIncome, domain.NecessityRequired, 100, "9999-12-31")}
