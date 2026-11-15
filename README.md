@@ -76,3 +76,17 @@ make build
 
 Архитектура описана в [`docs/architecture`](docs/architecture/README.md).
 
+## Работа команды и приёмка
+
+Роли и порядок поставки: [`docs/delivery/README.md`](docs/delivery/README.md). Утверждённые сценарии: [`SPEC.md`](docs/delivery/SPEC.md), финансовые правила и API: [`CONTRACT.md`](docs/delivery/CONTRACT.md). Текущий статус: [`STATUS.md`](docs/delivery/STATUS.md).
+
+Браузерные тесты используют собственные серверы и временную SQLite-базу:
+
+```bash
+cd frontend
+npx playwright install chromium
+npm run test:e2e
+```
+
+Проверяются desktop и мобильный экран 390px. Порты по умолчанию 4179 и 18089; при необходимости задать `E2E_PORT` и `E2E_API_PORT`. Тесты не подключаются к уже запущенному приложению. Команды unit/build/e2e также запускаются в GitHub Actions.
+

@@ -14,3 +14,6 @@ frontend/node_modules/
 frontend/dist/
 frontend/coverage/
 
+# Browser test output (contains temporary financial test data)
+frontend/e2e/.artifacts/
+
