@@ -102,15 +102,24 @@ button {
 
 @media (max-width: 640px) {
   .money-calendar .fc .fc-toolbar {
-    align-items: flex-start;
+    flex-direction: column;
+    align-items: stretch;
+    gap: .5rem;
+  }
+
+  .money-calendar .fc .fc-toolbar-chunk:empty {
+    display: none;
+  }
+
+  .money-calendar .fc .fc-toolbar-chunk:last-child {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem;
   }
 
   .money-calendar .fc .fc-toolbar-title {
     font-size: 1rem;
-  }
-
-  .money-calendar .fc .fc-today-button {
-    display: none;
   }
 
   .money-calendar .fc .fc-daygrid-day-frame {
