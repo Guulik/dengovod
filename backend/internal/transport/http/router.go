@@ -24,6 +24,27 @@ type moneyDTO struct {
 	Amount   int64  `json:"amount"`
 	Currency string `json:"currency"`
 }
+
+func (m *moneyDTO) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Amount   json.Number `json:"amount"`
+		Currency string      `json:"currency"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return domain.Validation("amount", "must be an integer money value")
+	}
+	amount, err := raw.Amount.Int64()
+	if err != nil || amount > domain.MaxMoney || amount < -domain.MaxMoney {
+		return domain.Validation("amount", "must be an integer within the supported money range")
+	}
+	if raw.Currency != "" && raw.Currency != "RUB" {
+		return domain.Validation("currency", "must be RUB")
+	}
+	m.Amount = amount
+	m.Currency = "RUB"
+	return nil
+}
+
 type recurrenceDTO struct {
 	Type         domain.RecurrenceType `json:"type"`
 	StartDate    string                `json:"start_date"`
@@ -63,6 +84,7 @@ func NewRouter(app *service.App) http.Handler {
 			r.Get("/events/{id}", h.getEvent)
 			r.Put("/events/{id}", h.putEvent)
 			r.Delete("/events/{id}", h.deleteEvent)
+			r.Put("/events/{id}/occurrences/{date}", h.putOccurrence)
 			r.Get("/day-cost-overrides", h.listOverrides)
 			r.Post("/day-cost-overrides", h.postOverride)
 			r.Put("/day-cost-overrides/{id}", h.putOverride)
@@ -160,7 +182,7 @@ func (h *handler) putSettings(w http.ResponseWriter, r *http.Request) {
 func balanceResponse(value domain.BalanceState) map[string]any {
 	return map[string]any{
 		"anchor":           map[string]any{"id": value.Anchor.ID, "amount": money(value.Anchor.Amount.Amount), "anchored_at": value.Anchor.AnchoredAt.UTC()},
-		"computed_balance": money(value.ComputedBalance.Amount), "as_of": value.AsOf.UTC(),
+		"computed_balance": money(value.ComputedBalance.Amount), "as_of": value.AsOf.UTC(), "needs_balance_review": value.NeedsBalanceReview,
 	}
 }
 
@@ -454,7 +476,41 @@ func occurrenceResponse(value domain.EventOccurrence) map[string]any {
 		category = value.CategoryID.String()
 	}
 	return map[string]any{"event_id": value.EventID, "kind": value.Kind, "necessity": value.Necessity,
-		"amount": money(value.Amount.Amount), "category_id": category, "comment": value.Comment}
+		"amount": money(value.Amount.Amount), "category_id": category, "comment": value.Comment,
+		"occurrence_date": value.Date.String(), "status": value.Status, "effective_at": value.EffectiveAt,
+		"counts_toward_day_budget": value.CountsTowardDayBudget, "series_deleted": value.SeriesDeleted}
+}
+func (h *handler) putOccurrence(w http.ResponseWriter, r *http.Request) {
+	id, err := parsePathID(r)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	date, err := domain.ParseDate(chi.URLParam(r, "date"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", err.Error(), "occurrence_date")
+		return
+	}
+	var request struct {
+		Status                domain.OccurrenceStatus `json:"status"`
+		EffectiveAt           *time.Time              `json:"effective_at"`
+		CountsTowardDayBudget *bool                   `json:"counts_toward_day_budget"`
+	}
+	if !decode(w, r, &request) {
+		return
+	}
+	value, err := h.app.ChangeOccurrence(r.Context(), userID(r), id, date, domain.OccurrenceChange{Status: request.Status, EffectiveAt: request.EffectiveAt, CountsTowardDayBudget: request.CountsTowardDayBudget})
+	if err != nil {
+		if errors.Is(err, domain.ErrValidation) {
+			writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", err.Error(), "")
+		} else {
+			respondError(w, err)
+		}
+		return
+	}
+	response := occurrenceResponse(value.EventOccurrence)
+	response["plan_restored"] = value.PlanRestored
+	writeJSON(w, http.StatusOK, response)
 }
 func summaryResponse(value domain.ForecastSummary) map[string]any {
 	return map[string]any{"current_balance": money(value.CurrentBalance.Amount), "money_for_life": money(value.MoneyForLife.Amount),
@@ -469,12 +525,22 @@ func calendarResponse(value forecast.Output) map[string]any {
 		for _, event := range day.Events {
 			events = append(events, occurrenceResponse(event))
 		}
-		days = append(days, map[string]any{"date": day.Date.String(), "expected_balance": money(day.ExpectedBalance.Amount),
-			"day_cost": money(day.DayCost.Amount), "money_for_life": money(day.MoneyForLife.Amount),
+		days = append(days, map[string]any{"date": day.Date.String(), "expected_balance": nullableMoney(day.ExpectedBalance),
+			"day_cost": money(day.DayCost.Amount), "money_for_life": nullableMoney(day.MoneyForLife),
 			"income_total": money(day.IncomeTotal.Amount), "required_total": money(day.RequiredTotal.Amount),
 			"optional_total": money(day.OptionalTotal.Amount), "events": events})
 	}
-	return map[string]any{"days": days, "summary": summaryResponse(value.Summary)}
+	var summary any
+	if value.Summary != nil {
+		summary = summaryResponse(*value.Summary)
+	}
+	return map[string]any{"days": days, "summary": summary}
+}
+func nullableMoney(value *domain.Money) any {
+	if value == nil {
+		return nil
+	}
+	return money(value.Amount)
 }
 func (h *handler) calendar(w http.ResponseWriter, r *http.Request) {
 	from, err := domain.ParseDate(r.URL.Query().Get("from"))
@@ -508,6 +574,10 @@ func decode(w http.ResponseWriter, r *http.Request, target any) bool {
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
+		if errors.Is(err, domain.ErrValidation) {
+			respondError(w, err)
+			return false
+		}
 		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "malformed JSON request", "")
 		return false
 	}
@@ -521,8 +591,8 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 func respondError(w http.ResponseWriter, err error) {
 	var typed *domain.DomainError
 	if errors.As(err, &typed) {
-		status := http.StatusUnprocessableEntity
-		if errors.Is(err, domain.ErrAnchorRequired) {
+		status := http.StatusBadRequest
+		if errors.Is(err, domain.ErrAnchorRequired) || errors.Is(err, domain.ErrConflict) {
 			status = http.StatusConflict
 		}
 		writeError(w, status, typed.Code, typed.Message, typed.Field)

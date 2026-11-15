@@ -44,4 +44,6 @@ type Store interface {
 	EventRepository
 	DayCostOverrideRepository
 	CategoryRepository
+	ChangeOccurrence(context.Context, uuid.UUID, uuid.UUID, domain.CalendarDate, domain.OccurrenceChange) (domain.OccurrenceResult, error)
+	FinancialSnapshot(context.Context, uuid.UUID) (domain.FinancialSnapshot, error)
 }

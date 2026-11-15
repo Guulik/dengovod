@@ -113,7 +113,7 @@ func TestHTTPVerticalSlice(t *testing.T) {
 	}
 }
 
-func TestPastDayEventAffectsBalanceAndCalendar(t *testing.T) {
+func TestPastPlanKeepsBalanceAndCalendarHistoryUnknown(t *testing.T) {
 	store, err := sqlite.Open(filepath.Join(t.TempDir(), "past.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -168,8 +168,8 @@ func TestPastDayEventAffectsBalanceAndCalendar(t *testing.T) {
 	if balance.Code != http.StatusOK {
 		t.Fatalf("balance: %d %s", balance.Code, balance.Body.String())
 	}
-	if got := decodeBody(balance)["computed_balance"].(map[string]any)["amount"].(float64); got != 8_500 {
-		t.Fatalf("computed balance: got %v want 8500", got)
+	if got := decodeBody(balance)["computed_balance"].(map[string]any)["amount"].(float64); got != 10_000 {
+		t.Fatalf("computed balance: got %v want 10000", got)
 	}
 
 	calendar := call(http.MethodGet, "/api/v1/calendar?from=2026-07-09&to=2026-07-11", token, nil)
@@ -184,7 +184,7 @@ func TestPastDayEventAffectsBalanceAndCalendar(t *testing.T) {
 	if past["date"] != "2026-07-10" {
 		t.Fatalf("expected past day 2026-07-10, got %v", past["date"])
 	}
-	if past["expected_balance"].(map[string]any)["amount"].(float64) != 8_500 {
+	if past["expected_balance"] != nil {
 		t.Fatalf("past day balance: %+v", past["expected_balance"])
 	}
 	if len(past["events"].([]any)) != 1 {
