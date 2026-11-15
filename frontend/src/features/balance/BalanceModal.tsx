@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { errorMessage } from '../../api/client'
 import { useBalance, useSetAnchor } from '../../api/hooks'
 import { Button, ErrorNotice, Field, Input, Modal } from '../../components/ui'
-import { formatDate, toApiDate } from '../../lib/dates'
+import { formatDate, moscowDate } from '../../lib/dates'
+import { currentSession, isCurrentSession } from '../../api/session'
 import { formatMoney, kopecksToInput, parseRubles } from '../../lib/money'
 import { useUIStore } from '../../stores/uiStore'
 
@@ -23,11 +24,12 @@ export function BalanceModal() {
 
   const save = async () => {
     if (invalid) return
+    const session = currentSession()
     await setAnchor.mutateAsync(parsed)
-    setBalanceOpen(false)
+    if (isCurrentSession(session)) setBalanceOpen(false)
   }
 
-  const anchorDate = balance ? toApiDate(new Date(balance.anchor.anchored_at)) : null
+  const anchorDate = balance ? moscowDate(new Date(balance.anchor.anchored_at)) : null
 
   return (
     <Modal open={open} onClose={() => setBalanceOpen(false)} title="Текущий баланс">
@@ -55,7 +57,7 @@ export function BalanceModal() {
           <Button variant="ghost" onClick={() => setBalanceOpen(false)}>
             Отмена
           </Button>
-          <Button onClick={() => void save()} disabled={setAnchor.isPending || invalid}>
+          <Button onClick={() => void save().catch(() => undefined)} disabled={setAnchor.isPending || invalid}>
             {setAnchor.isPending ? 'Сохраняем…' : 'Сохранить'}
           </Button>
         </div>

@@ -6,7 +6,8 @@ import { useAuthStore } from './stores/authStore'
 
 function ProtectedRoute() {
   const token = useAuthStore((state) => state.token)
-  return token ? <Outlet /> : <Navigate to="/login" replace />
+  const sessionId = useAuthStore((state) => state.sessionId)
+  return token ? <Outlet key={sessionId} /> : <Navigate to="/login" replace />
 }
 
 function App() {

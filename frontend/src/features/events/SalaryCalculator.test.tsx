@@ -1,0 +1,42 @@
+import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { SalaryCalculator } from './SalaryCalculator'
+
+describe('salary calculator input helper', () => {
+  it('requires an explicit apply and resets hidden days when mode or month changes', () => {
+    const apply = vi.fn()
+    render(<SalaryCalculator onApply={apply} />)
+    fireEvent.change(screen.getByLabelText('Оклад за полный месяц, ₽'), { target: { value: '100000' } })
+    fireEvent.change(screen.getByLabelText('Расчётный месяц'), { target: { value: '2026-04' } })
+    fireEvent.change(screen.getByLabelText('Отработано календарных дней'), { target: { value: '15' } })
+    expect(apply).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Применить к сумме' }))
+    expect(apply).toHaveBeenLastCalledWith(5000000)
+    fireEvent.change(screen.getByLabelText('Как указать отработанные дни'), { target: { value: 'dates' } })
+    expect(screen.getAllByRole('checkbox')).toHaveLength(30)
+    expect(screen.getAllByRole('checkbox').every((input) => !(input as HTMLInputElement).checked)).toBe(true)
+    fireEvent.click(screen.getByLabelText('2026-04-01'))
+    fireEvent.click(screen.getByLabelText('2026-04-02'))
+    fireEvent.click(screen.getByRole('button', { name: 'Применить к сумме' }))
+    expect(apply).toHaveBeenLastCalledWith(666667)
+    fireEvent.change(screen.getByLabelText('Расчётный месяц'), { target: { value: '2028-02' } })
+    expect(screen.getAllByRole('checkbox')).toHaveLength(29)
+    expect(screen.getAllByRole('checkbox').every((input) => !(input as HTMLInputElement).checked)).toBe(true)
+    fireEvent.change(screen.getByLabelText('Как указать отработанные дни'), { target: { value: 'count' } })
+    expect(screen.getByLabelText('Отработано календарных дней')).toHaveValue(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Применить к сумме' }))
+    expect(apply).toHaveBeenLastCalledWith(0)
+    expect(screen.getByText(/Сохранить операцию можно только/)).toBeInTheDocument()
+  })
+  it('blocks invalid salary, fractional count and out-of-range count', () => {
+    render(<SalaryCalculator onApply={vi.fn()} />)
+    const apply = screen.getByRole('button', { name: 'Применить к сумме' })
+    expect(apply).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('Оклад за полный месяц, ₽'), { target: { value: '100' } })
+    fireEvent.change(screen.getByLabelText('Расчётный месяц'), { target: { value: '2026-02' } })
+    fireEvent.change(screen.getByLabelText('Отработано календарных дней'), { target: { value: '1.5' } })
+    expect(apply).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('Отработано календарных дней'), { target: { value: '29' } })
+    expect(apply).toBeDisabled()
+  })
+})
