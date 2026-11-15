@@ -356,3 +356,58 @@ INSERT INTO actual_transactions VALUES ('80000000-0000-4000-8000-000000000002','
 		}
 	}
 }
+
+func TestBusinessLegacyAggregateOverflowRollsBackFinancialMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy-aggregate-overflow.db")
+	db := businessRawDB(t, path)
+	if _, err := db.Exec(businessLegacySchema + `
+UPDATE anchors SET amount=9007199254740990 WHERE id='30000000-0000-4000-8000-000000000002';
+INSERT INTO actual_transactions VALUES ('90000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','INCOME',2,NULL,'2026-07-11','Individually safe, aggregate unsafe',NULL,'2026-07-11 09:00:00+00:00');
+`); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before := businessLegacySnapshot(t, path)
+	store, err := sqlite.Open(path)
+	if err == nil {
+		store.Close()
+		t.Fatal("aggregate unsafe legacy balance accepted: 9007199254740990 + 2 exceeds MAX_SAFE_INTEGER")
+	}
+	if after := businessLegacySnapshot(t, path); !reflect.DeepEqual(before, after) {
+		t.Fatal("rejected aggregate-overflow migration changed legacy rows or monetary values")
+	}
+	db = businessRawDB(t, path)
+	defer db.Close()
+	var committed int
+	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations WHERE version >= 3`).Scan(&committed); err != nil {
+		t.Fatal(err)
+	}
+	if committed != 0 {
+		t.Fatalf("financial migration was recorded despite aggregate overflow: %d committed versions >= 3", committed)
+	}
+	// v1/v2 may remain committed. No new financial table from v3 may survive.
+	rows, err := db.Query(`SELECT name FROM sqlite_schema WHERE type='table'
+AND name NOT LIKE 'sqlite_%' AND name <> 'schema_migrations' ORDER BY name`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		tables = append(tables, name)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	wantTables := []string{"actual_transactions", "anchors", "categories", "day_cost_overrides", "event_occurrence_overrides", "financial_events", "settings", "users"}
+	if !reflect.DeepEqual(tables, wantTables) {
+		t.Fatalf("financial migration left partial tables: got %v, want legacy tables %v", tables, wantTables)
+	}
+}

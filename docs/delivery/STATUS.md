@@ -10,6 +10,11 @@
 - Пользователь явно разрешил самостоятельно сливать проверенные PR по этому бэклогу в main после успешных тестов и повторного ревью. Первоначальный отказ автоматической проверки разрешений снят новым явным разрешением.
 - Функциональная ветка общей рабочей копии: release/DV-1, основана на A-1.
 - Составлены SPEC.md и APPROVED CONTRACT.md; design findings обоих ревьюеров обработаны.
-- Созданы исполнители backend/frontend и независимые QA business/e2e; реализация и тесты идут параллельно.
-- Добавлен CI workflow backend/frontend/e2e. Подключение GitHub доступно; чтение issues и git origin подтверждены.
-- Issues открыты. Реализация, независимые проверки, повторное ревью и публикация ещё не завершены.
+- Созданы исполнители backend/frontend и независимые QA business/e2e. Реализация завершена, код зафиксирован: frontend 9d839a5, backend c42b473, независимые тесты c862f96.
+- [Функциональный PR #6](https://github.com/Guulik/dengovod/pull/6) опубликован; повторные backend/frontend ревью по точным коммитам завершены: No findings.
+- После ревью: frontend 96ed958 (полночь и точный момент факта), 6fa8db7 (Today на мобильном); повторное frontend/CSS ревью — No findings. Полный frontend набор теперь 67 тестов, новые два e2e Today прошли, включая 320/390px.
+- Backend fixes a3d2452 (bounded/sparse расчёт и aggregate legacy validation до commit v3) и 3e54780 (пропуск перекрытого исторического резерва) прошли повторное review: No findings.
+- Локально прошли 37 независимых бизнес-сценариев, 67 frontend unit/component tests, 32 базовых desktop/mobile e2e и 2 новые адресные регрессии Today. Go tests/vet/build и frontend lint/build/e2e typecheck прошли.
+- [CI run 43715370852](https://github.com/Guulik/dengovod/actions/runs/43715370852): backend с race detector, frontend и e2e на Linux — PASS.
+- PR #6 содержит Closes для всех четырёх issues; актуальное состояние слияния и закрытия задач отражается в GitHub. Финальные проверки полного набора 34 e2e, frontend и backend с race detector — в checks PR #6.
+- Итоговый отчёт: REPORT.md; подробные QA-результаты: ../qa/business-report.md и ../qa/e2e-report.md.

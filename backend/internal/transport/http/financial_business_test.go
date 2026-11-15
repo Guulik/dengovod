@@ -2,6 +2,7 @@ package httptransport_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -751,4 +752,119 @@ func TestBusinessMoneyLimitsOnSettingsOverridesAndEventUpdate(t *testing.T) {
 	forecast := api.call(http.MethodGet, "/forecast", token, nil, http.StatusOK)
 	businessMoney(t, forecast, "money_for_life", maxSafe-100)
 	api.balance(token, 0)
+}
+
+// The deadline is a safety guard for unbounded date expansion, not a latency
+// benchmark. All assertions concern HTTP status and the financial contract.
+func (api businessAPI) boundedGet(path, token string, want int) map[string]json.RawMessage {
+	api.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	request := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/v1"+path, nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		response := httptest.NewRecorder()
+		api.router.ServeHTTP(response, request)
+		done <- response
+	}()
+	var response *httptest.ResponseRecorder
+	select {
+	case response = <-done:
+	case <-ctx.Done():
+		api.t.Fatalf("GET %s did not finish within the request deadline: %v", path, ctx.Err())
+	}
+	if ctx.Err() != nil || response.Code != want {
+		api.t.Fatalf("GET %s: got %d, want %d, context=%v: %s", path, response.Code, want, ctx.Err(), response.Body.String())
+	}
+	var value map[string]json.RawMessage
+	if err := json.Unmarshal(response.Body.Bytes(), &value); err != nil {
+		api.t.Fatal(err)
+	}
+	return value
+}
+
+func TestBusinessAncientCalendarRemainsAvailableAndRemoteFutureIsRejected(t *testing.T) {
+	api := newBusinessAPI(t)
+	token := api.login("business-calendar-extreme-dates")
+	api.anchor(token, 1_000_000, "2026-07-11T08:00:00Z")
+	id := api.create(token, "EXPENSE", "0001-01-01", 150_000)
+	value := api.boundedGet("/calendar?from=0001-01-01&to=0001-01-01", token, http.StatusOK)
+	days := businessField[[]map[string]json.RawMessage](t, value, "days")
+	if len(days) != 1 || businessField[string](t, days[0], "date") != "0001-01-01" {
+		t.Fatalf("ancient single-day calendar: %s", value["days"])
+	}
+	if string(days[0]["expected_balance"]) != "null" || string(days[0]["money_for_life"]) != "null" {
+		t.Fatalf("pre-anchor ancient balances must remain unknown: %v", days[0])
+	}
+	items := businessField[[]map[string]json.RawMessage](t, days[0], "events")
+	if len(items) != 1 || businessField[string](t, items[0], "event_id") != id || businessField[string](t, items[0], "status") != "PLANNED" {
+		t.Fatalf("ancient operation missing: %s", days[0]["events"])
+	}
+	businessMoney(t, days[0], "required_total", 150_000)
+	summary := businessField[map[string]json.RawMessage](t, value, "summary")
+	businessMoney(t, summary, "current_balance", 1_000_000)
+	businessMoney(t, summary, "money_for_life", 1_000_000)
+	remote := api.now.AddDate(0, 0, 3661).Format("2006-01-02")
+	rejected := api.boundedGet("/calendar?from="+remote+"&to="+remote, token, http.StatusBadRequest)
+	problem := businessField[map[string]json.RawMessage](t, rejected, "error")
+	if code := businessField[string](t, problem, "code"); code != "VALIDATION_ERROR" {
+		t.Fatalf("remote future error: %q", code)
+	}
+}
+
+func TestBusinessNextIncomeOutsideSearchWindowFallsBackToMonthEnd(t *testing.T) {
+	api := newBusinessAPI(t)
+	token := api.login("business-remote-next-income")
+	api.settings(token, 40_000, "NEXT_INCOME", "")
+	api.anchor(token, 1_000_000, "2026-07-11T08:00:00Z")
+	api.create(token, "INCOME", "9999-12-31", 870_000)
+	forecast := api.boundedGet("/forecast", token, http.StatusOK)
+	if day := businessField[string](t, forecast, "horizon_date"); day != "2026-07-31" {
+		t.Fatalf("income outside the 3660-day search window must fall back to month end: %s", day)
+	}
+	if days := businessField[int](t, forecast, "days_until_horizon"); days != 21 {
+		t.Fatalf("fallback must include July 11 through July 31: %d days", days)
+	}
+	businessMoney(t, forecast, "current_balance", 1_000_000)
+	businessMoney(t, forecast, "day_cost_remaining", 840_000)
+	businessMoney(t, forecast, "money_for_life", 160_000)
+}
+
+func TestBusinessLaterAnchorDiscardsOverflowingReserveInEveryCalendarRange(t *testing.T) {
+	api := newBusinessAPI(t)
+	token := api.login("business-anchor-resets-reserve-gap")
+	api.settings(token, 0, "CUSTOM_DATE", "2026-07-11")
+	api.anchor(token, 10_000, "2026-07-01T08:00:00Z")
+	api.call(http.MethodPost, "/day-cost-overrides", token, map[string]any{
+		"date_from": "2026-07-02", "date_to": "2026-07-10",
+		"daily_amount": map[string]any{"amount": int64(9_007_199_254_740_991), "currency": "RUB"},
+	}, http.StatusCreated)
+	api.anchor(token, 20_000, "2026-07-11T08:00:00Z")
+	full := api.call(http.MethodGet, "/calendar?from=2026-07-01&to=2026-07-11", token, nil, http.StatusOK)
+	fullDays := businessField[[]map[string]json.RawMessage](t, full, "days")
+	if len(fullDays) != 11 {
+		t.Fatalf("full calendar returned %d days, want 11", len(fullDays))
+	}
+	businessMoney(t, fullDays[0], "money_for_life", 20_000)
+	short := api.call(http.MethodGet, "/calendar?from=2026-07-01&to=2026-07-01", token, nil, http.StatusOK)
+	shortDays := businessField[[]map[string]json.RawMessage](t, short, "days")
+	if len(shortDays) != 1 {
+		t.Fatalf("single-day calendar returned %d days, want 1", len(shortDays))
+	}
+	businessMoney(t, shortDays[0], "money_for_life", 20_000)
+	fullDay, err := json.Marshal(fullDays[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	shortDay, err := json.Marshal(shortDays[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(fullDay, shortDay) {
+		t.Fatalf("visible range changed July 1: full=%s short=%s", fullDay, shortDay)
+	}
+	if !bytes.Equal(full["summary"], short["summary"]) {
+		t.Fatalf("visible range changed summary: full=%s short=%s", full["summary"], short["summary"])
+	}
 }
