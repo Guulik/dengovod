@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "vitest",
+    "test": "vitest --exclude \"e2e/**\"",
+    "test:e2e": "playwright test",
+    "test:e2e:desktop": "playwright test --project=desktop",
+    "test:e2e:typecheck": "tsc --project e2e/tsconfig.json",
+    "test:e2e:report": "playwright show-report e2e/.artifacts/report",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -28,6 +32,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
     "@tailwindcss/vite": "^4.3.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
