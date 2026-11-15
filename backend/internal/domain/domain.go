@@ -126,13 +126,17 @@ type BalanceAnchor struct {
 	AnchoredAt time.Time
 	CreatedAt  time.Time
 }
+
+const CategorySystemSalary = "SALARY"
+
 type Category struct {
-	ID        uuid.UUID
-	UserID    uuid.UUID
-	Name      string
-	Kind      EventKind
-	IsDefault bool
-	CreatedAt time.Time
+	ID         uuid.UUID
+	UserID     uuid.UUID
+	Name       string
+	Kind       EventKind
+	IsDefault  bool
+	SystemCode *string
+	CreatedAt  time.Time
 }
 type FinancialEvent struct {
 	ID         uuid.UUID
