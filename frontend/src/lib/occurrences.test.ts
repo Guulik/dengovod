@@ -19,7 +19,7 @@ describe('Moscow financial dates', () => {
     const now = new Date('2026-11-15T12:00:00Z')
     expect(effectiveTimeToApi('2026-11-14T12:00', now)).toBe('2026-11-14T09:00:00.000Z')
     expect(effectiveTimeToApi('2026-11-15T15:00:00', now)).toBe(now.toISOString())
-    expect(effectiveTimeToApi('', now)).toBeUndefined()
+    expect(effectiveTimeToApi('', now)).toBe(now.toISOString())
     expect(effectiveTimeToApi('0001-01-01T12:00', now)).toBe('0001-01-01T09:00:00.000Z')
     expect(() => effectiveTimeToApi('2026-11-15T15:00:01', now)).toThrow('будущем')
     expect(() => effectiveTimeToApi('2026-02-29T12:00', now)).toThrow()

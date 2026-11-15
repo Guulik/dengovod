@@ -37,8 +37,10 @@ export function defaultEffectiveTime(occurrenceDate: string): string {
   return occurrenceDate === today() ? '' : `${occurrenceDate}T12:00`
 }
 
-export function effectiveTimeToApi(value: string, now = new Date()): string | undefined {
-  if (!value) return undefined // Today's default is server Now, after the latest balance check.
+export function effectiveTimeToApi(value: string, now = new Date()): string {
+  // Empty means the user's current instant, captured before any create/refetch awaits.
+  // Sending it explicitly also keeps that intent when the request crosses Moscow midnight.
+  if (!value) return now.toISOString()
   const valid = /^((?!0000)\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/.exec(value)
   if (!valid || Number(valid[1]) < 1) throw new Error('Укажите корректные дату и время исполнения')
   const [, year, month, day] = valid

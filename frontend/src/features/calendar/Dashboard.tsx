@@ -12,6 +12,7 @@ import { Button, ErrorNotice, LoadingBlock } from '../../components/ui'
 import { formatDate, toApiDate, today } from '../../lib/dates'
 import { horizonPolicyLabels } from '../../lib/horizon'
 import { formatMoney } from '../../lib/money'
+import { moscowDateTime } from '../../lib/occurrences'
 import { useUIStore } from '../../stores/uiStore'
 import { EventModal } from '../events/EventModal'
 import { OnboardingModal } from '../balance/OnboardingModal'
@@ -89,13 +90,13 @@ function CalendarView({ days, onRange }: { days: CalendarDay[]; onRange: (from: 
         plugins={[dayGridPlugin]}
         initialView="dayGridMonth"
         initialDate={initialDate}
-        now={today()}
+        now={moscowDateTime}
         firstDay={1}
         fixedWeekCount={false}
         height="auto"
         headerToolbar={{ left: 'title', center: '', right: 'prev,next today' }}
         buttonText={{ today: 'Сегодня' }}
-        titleFormat={(arg) => format(arg.date.marker, 'LLLL yyyy', { locale: ru })}
+        titleFormat={(arg) => format(parseISO(`${String(arg.date.year).padStart(4, '0')}-${String(arg.date.month + 1).padStart(2, '0')}-01`), 'LLLL yyyy', { locale: ru })}
         datesSet={datesSet}
         dayCellContent={(arg) => <DayCell arg={arg} day={byDate.get(toApiDate(arg.date))} />}
       />

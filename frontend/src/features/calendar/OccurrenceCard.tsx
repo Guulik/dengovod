@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { useSetOccurrenceState } from '../../api/hooks'
+import { useSetOccurrenceState, type OccurrencePayload } from '../../api/hooks'
 import type { Occurrence } from '../../api/schemas'
 import { errorMessage } from '../../api/client'
 import { Button, ErrorNotice } from '../../components/ui'
@@ -19,6 +19,7 @@ export function OccurrenceCard({ occurrence }: { occurrence: Occurrence }) {
   const [effectiveTime, setEffectiveTime] = useState(() => defaultEffectiveTime(occurrence.occurrence_date))
   const [budget, setBudget] = useState(false)
   const [validationError, setValidationError] = useState('')
+  const [confirmation, setConfirmation] = useState<OccurrencePayload>()
   const locked = useRef(false)
   const future = occurrence.occurrence_date > today()
   const change = async (status: Occurrence['status']) => {
@@ -26,14 +27,16 @@ export function OccurrenceCard({ occurrence }: { occurrence: Occurrence }) {
     const session = currentSession()
     setValidationError('')
     try {
-      const time = status === 'CONFIRMED' ? effectiveTimeToApi(effectiveTime) : undefined
-      locked.current = true
-      const result = await update.mutateAsync({
+      const payload: OccurrencePayload = status === 'CONFIRMED' && confirmation ? confirmation : {
         eventId: occurrence.event_id, occurrenceDate: occurrence.occurrence_date, status,
-        ...(status === 'CONFIRMED' ? { ...(time ? { effective_at: time } : {}), ...(occurrence.kind === 'EXPENSE' ? { counts_toward_day_budget: budget } : {}) } : {}),
-      })
+        ...(status === 'CONFIRMED' ? { effective_at: effectiveTimeToApi(effectiveTime), ...(occurrence.kind === 'EXPENSE' ? { counts_toward_day_budget: budget } : {}) } : {}),
+      }
+      if (status === 'CONFIRMED') setConfirmation(payload)
+      locked.current = true
+      const result = await update.mutateAsync(payload)
       if (isCurrentSession(session) && status === 'PLANNED' && !result.plan_restored) useUIStore.getState().setNotice('Подтверждение снято. План не восстановлен: правило повторения изменилось')
       setConfirming(false)
+      setConfirmation(undefined)
     } catch (error) {
       if (!(error instanceof DOMException && error.name === 'AbortError')) setValidationError(error instanceof Error ? error.message : errorMessage(error))
     } finally {
@@ -53,10 +56,11 @@ export function OccurrenceCard({ occurrence }: { occurrence: Occurrence }) {
       {occurrence.effective_at && <p className="text-xs text-stone-500">Исполнено: {moscowDateTime(new Date(occurrence.effective_at)).replace('T', ' ')} (Москва). Исходная дата: {occurrence.occurrence_date}.{occurrence.counts_toward_day_budget ? ' Из стоимости дня.' : ''}</p>}
       {occurrence.series_deleted ? <p className="text-xs text-stone-500">Серия удалена. Сохранённый факт доступен для просмотра.</p> : (
         <>
-          {confirming && <FactFields occurrenceDate={occurrence.occurrence_date} effectiveTime={effectiveTime} onTimeChange={setEffectiveTime} expense={occurrence.kind === 'EXPENSE'} countsTowardBudget={budget} onBudgetChange={setBudget} />}
+          {confirming && <FactFields effectiveTime={effectiveTime} onTimeChange={(value) => { setEffectiveTime(value); setConfirmation(undefined) }} expense={occurrence.kind === 'EXPENSE'} countsTowardBudget={budget} onBudgetChange={(value) => { setBudget(value); setConfirmation(undefined) }} />}
+          {confirmation && update.error && <p className="text-xs text-stone-500">Повтор сохраняет время и параметры первого нажатия. Чтобы изменить время, укажите его явно.</p>}
           <div className="flex flex-wrap gap-2">
             {occurrence.status === 'PLANNED' && !future && (confirming ? (
-              <Button disabled={update.isPending} onClick={() => void change('CONFIRMED')}>{update.isPending ? 'Подтверждаем…' : 'Подтвердить факт'}</Button>
+              <Button disabled={update.isPending} onClick={() => void change('CONFIRMED')}>{update.isPending ? 'Подтверждаем…' : confirmation ? 'Повторить подтверждение' : 'Подтвердить факт'}</Button>
             ) : <Button variant="secondary" onClick={() => setConfirming(true)}>Подтвердить исполнение</Button>)}
             {occurrence.status === 'PLANNED' && <Button variant="ghost" disabled={update.isPending} onClick={() => void change('CANCELLED')}>Отменить план</Button>}
             {occurrence.status !== 'PLANNED' && <Button variant="secondary" disabled={update.isPending} onClick={() => void change('PLANNED')}>{update.isPending ? 'Обновляем…' : occurrence.status === 'CONFIRMED' ? 'Снять подтверждение' : 'Восстановить план'}</Button>}

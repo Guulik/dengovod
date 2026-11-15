@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Dashboard } from './Dashboard'
 import { useUIStore } from '../../stores/uiStore'
@@ -24,6 +24,7 @@ vi.mock('../settings/SettingsModal', () => ({ SettingsModal: () => null }))
 vi.mock('./OccurrenceCard', () => ({ OccurrenceCard: () => null }))
 
 afterEach(() => {
+  vi.useRealTimers()
   useUIStore.getState().reset()
   state.forecast = { data: undefined, error: null, isLoading: true }
   state.balance = { data: undefined, error: null, isLoading: true }
@@ -32,6 +33,23 @@ afterEach(() => {
 })
 
 describe('calendar remains available during financial loading', () => {
+  it.each([
+    ['2026-11-14T20:59:00Z', '2026-11-15', /ноябрь 2026/i],
+    ['2026-11-30T20:59:00Z', '2026-12-01', /декабрь 2026/i],
+    ['2026-12-31T20:59:00Z', '2027-01-01', /январь 2027/i],
+  ])('Today reads the current Moscow date after midnight from %s', async (before, expectedDate, expectedTitle) => {
+    vi.useFakeTimers().setSystemTime(new Date(before))
+    const view = render(<Dashboard />)
+    fireEvent.click(view.container.querySelector('.fc-prev-button')!)
+    await act(async () => { vi.advanceTimersByTime(120_000) })
+    fireEvent.click(view.container.querySelector('.fc-today-button')!)
+    expect(view.container.querySelector('.fc-toolbar-title')).toHaveTextContent(expectedTitle)
+    const todayCell = view.container.querySelector<HTMLElement>('.fc-day-today')!
+    expect(todayCell.dataset.date).toBe(expectedDate)
+    fireEvent.click(todayCell.querySelector('button')!)
+    expect(useUIStore.getState().selectedDate).toBe(expectedDate)
+  })
+
   it('preserves the selected month through loading, errors, and query refresh', () => {
     const view = render(<Dashboard />)
     const title = () => view.container.querySelector('.fc-toolbar-title')!.textContent

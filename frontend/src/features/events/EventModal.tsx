@@ -235,7 +235,7 @@ export function EventModal() {
             </Select>
           </Field>
           {future && <p className="text-xs text-stone-500">Будущая операция сохраняется как план.</p>}
-          {!future && asFact && <FactFields occurrenceDate={firstDate!} effectiveTime={effectiveTime} onTimeChange={setEffectiveTime} expense={kind === 'EXPENSE'} countsTowardBudget={budget} onBudgetChange={setBudget} />}
+          {!future && asFact && <FactFields effectiveTime={effectiveTime} onTimeChange={setEffectiveTime} expense={kind === 'EXPENSE'} countsTowardBudget={budget} onBudgetChange={setBudget} />}
           {recurrenceType !== 'NONE' && <p className="text-xs text-stone-500">Первое вхождение: {firstDate ?? 'нет в выбранном периоде'}. Следующие повторения будут планами. Факт относится только к первому вхождению.</p>}
         </div>}
         {validationError && <ErrorNotice>{validationError}</ErrorNotice>}
