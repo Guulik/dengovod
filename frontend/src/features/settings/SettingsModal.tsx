@@ -30,7 +30,7 @@ function OverrideEditor({ value, onDone }: { value?: DayCostOverride; onDone: ()
   }
 
   return (
-    <form className="mt-4 grid gap-3 rounded-2xl border border-stone-200 bg-white p-4" onSubmit={submit}>
+    <form className="mt-4 grid gap-3 rounded-2xl border border-stone-200 bg-white p-4" onSubmit={(event) => void submit(event).catch(() => undefined)}>
       <div className="grid grid-cols-2 gap-3">
         <Field label="С даты"><Input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></Field>
         <Field label="По дату"><Input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></Field>
@@ -80,7 +80,7 @@ export function SettingsModal() {
     <Modal open={open} title="Настройки прогноза" onClose={() => setOpen(false)} wide>
       {isLoading ? <LoadingBlock /> : (
         <div className="grid gap-8 md:grid-cols-[1fr_1.1fr]">
-          <form className="grid content-start gap-5" onSubmit={submitSettings}>
+          <form className="grid content-start gap-5" onSubmit={(event) => void submitSettings(event).catch(() => undefined)}>
             <div>
               <h3 className="font-bold">Основные параметры</h3>
               <p className="mt-1 text-sm text-stone-500">Используются для ежедневного прогноза.</p>

@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 export const moneySchema = z.object({
-  amount: z.number().int(),
+  amount: z.number().int().safe(),
   currency: z.literal('RUB'),
 })
 
@@ -43,11 +43,17 @@ export const categorySchema = z.object({
   name: z.string(),
   kind: z.enum(['INCOME', 'EXPENSE']),
   is_default: z.boolean(),
+  system_code: z.string().nullable().optional(),
 })
 export const categoriesSchema = z.object({ categories: z.array(categorySchema) })
 
 export const occurrenceSchema = z.object({
   event_id: z.string().uuid(),
+  occurrence_date: isoDate,
+  status: z.enum(['PLANNED', 'CONFIRMED', 'CANCELLED']),
+  effective_at: z.string().nullable(),
+  counts_toward_day_budget: z.boolean(),
+  series_deleted: z.boolean(),
   kind: z.enum(['INCOME', 'EXPENSE']),
   necessity: z.enum(['REQUIRED', 'OPTIONAL']),
   amount: moneySchema,
@@ -66,11 +72,13 @@ export const forecastSchema = z.object({
   days_until_horizon: z.number().int(),
 })
 
+export const occurrenceStateSchema = occurrenceSchema.extend({ plan_restored: z.boolean() })
+
 export const calendarDaySchema = z.object({
   date: isoDate,
-  expected_balance: moneySchema,
+  expected_balance: moneySchema.nullable(),
   day_cost: moneySchema,
-  money_for_life: moneySchema,
+  money_for_life: moneySchema.nullable(),
   income_total: moneySchema,
   required_total: moneySchema,
   optional_total: moneySchema,
@@ -78,7 +86,7 @@ export const calendarDaySchema = z.object({
 })
 export const calendarSchema = z.object({
   days: z.array(calendarDaySchema),
-  summary: forecastSchema,
+  summary: forecastSchema.nullable(),
 })
 
 export const settingsSchema = z.object({
@@ -90,6 +98,7 @@ export const settingsSchema = z.object({
 })
 
 export const balanceSchema = z.object({
+  needs_balance_review: z.boolean(),
   anchor: z.object({
     id: z.string().uuid(),
     amount: moneySchema,
@@ -123,5 +132,6 @@ export type Event = z.infer<typeof eventSchema>
 export type Category = z.infer<typeof categorySchema>
 export type Forecast = z.infer<typeof forecastSchema>
 export type CalendarDay = z.infer<typeof calendarDaySchema>
+export type Occurrence = z.infer<typeof occurrenceSchema>
 export type Settings = z.infer<typeof settingsSchema>
 export type DayCostOverride = z.infer<typeof overrideSchema>

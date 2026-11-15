@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"time"
 
@@ -49,6 +48,11 @@ func (a *App) UpdateSettings(ctx context.Context, settings domain.UserSettings) 
 	if err := domain.ValidateSettings(settings); err != nil {
 		return settings, err
 	}
+	today := domain.DateFromTime(a.Now())
+	if settings.HorizonPolicy == domain.HorizonCustomDate && settings.HorizonCustomDate != nil &&
+		(settings.HorizonCustomDate.Before(today) || domain.DaysBetween(today, *settings.HorizonCustomDate) > 3660) {
+		return settings, domain.Validation("horizon_custom_date", "must be between today and 3660 days from today")
+	}
 	settings.UpdatedAt = a.Now().UTC()
 	if err := a.store.UpdateSettings(ctx, settings); err != nil {
 		return settings, err
@@ -57,11 +61,14 @@ func (a *App) UpdateSettings(ctx context.Context, settings domain.UserSettings) 
 }
 
 func (a *App) SetAnchor(ctx context.Context, userID uuid.UUID, amount int64, anchoredAt time.Time) (domain.BalanceState, error) {
-	if amount < 0 {
-		return domain.BalanceState{}, domain.Validation("amount", "must be >= 0")
+	if amount < 0 || amount > domain.MaxMoney {
+		return domain.BalanceState{}, domain.Validation("amount", "must be between 0 and 9007199254740991")
 	}
 	if anchoredAt.IsZero() {
 		anchoredAt = a.Now()
+	}
+	if anchoredAt.After(a.Now()) || anchoredAt.Year() < 1 || anchoredAt.Year() > 9999 {
+		return domain.BalanceState{}, domain.Validation("anchored_at", "must be a non-future timestamp from year 0001")
 	}
 	anchor := domain.BalanceAnchor{
 		ID: uuid.New(), UserID: userID, Amount: domain.Rub(amount),
@@ -74,11 +81,16 @@ func (a *App) SetAnchor(ctx context.Context, userID uuid.UUID, amount int64, anc
 }
 
 func (a *App) GetBalance(ctx context.Context, userID uuid.UUID) (domain.BalanceState, error) {
-	output, anchor, err := a.calculate(ctx, userID, domain.DateFromTime(a.Now()), domain.DateFromTime(a.Now()))
+	snapshot, err := a.store.FinancialSnapshot(ctx, userID)
 	if err != nil {
 		return domain.BalanceState{}, err
 	}
-	return domain.BalanceState{Anchor: anchor, ComputedBalance: output.Summary.CurrentBalance, AsOf: a.Now().UTC()}, nil
+	now := a.Now().UTC()
+	amount, anchor, err := forecast.ActualBalance(ctx, forecast.Input{Anchors: snapshot.Anchors, Occurrences: snapshot.Occurrences, LegacyFacts: snapshot.LegacyFacts, AsOf: now})
+	if err != nil {
+		return domain.BalanceState{}, err
+	}
+	return domain.BalanceState{Anchor: *anchor, ComputedBalance: amount, AsOf: now, NeedsBalanceReview: snapshot.NeedsBalanceReview}, nil
 }
 
 func (a *App) CreateEvent(ctx context.Context, event domain.FinancialEvent) (domain.FinancialEvent, error) {
@@ -170,38 +182,50 @@ func (a *App) Calendar(ctx context.Context, userID uuid.UUID, from, to domain.Ca
 	if to.Before(from) {
 		return forecast.Output{}, domain.Validation("to", "must not precede from")
 	}
+	if domain.DaysBetween(from, to) >= 366 {
+		return forecast.Output{}, domain.Validation("to", "calendar range must not exceed 366 days")
+	}
+	if domain.DaysBetween(domain.DateFromTime(a.Now()), to) > forecast.MaxForecastDays {
+		return forecast.Output{}, domain.Validation("to", "calendar must not extend more than 3660 days from today")
+	}
 	output, _, err := a.calculate(ctx, userID, from, to)
 	return output, err
 }
 
 func (a *App) Forecast(ctx context.Context, userID uuid.UUID) (domain.ForecastSummary, error) {
 	today := domain.DateFromTime(a.Now())
-	output, _, err := a.calculate(ctx, userID, today, today.AddDays(3660))
-	return output.Summary, err
+	output, _, err := a.calculate(ctx, userID, today, today)
+	if err != nil {
+		return domain.ForecastSummary{}, err
+	}
+	if output.Summary == nil {
+		return domain.ForecastSummary{}, domain.ErrAnchorRequired
+	}
+	return *output.Summary, nil
 }
 
 func (a *App) calculate(ctx context.Context, userID uuid.UUID, from, to domain.CalendarDate) (forecast.Output, domain.BalanceAnchor, error) {
-	anchor, err := a.store.LatestAnchor(ctx, userID)
-	if errors.Is(err, domain.ErrAnchorRequired) {
-		return forecast.Output{}, anchor, &domain.DomainError{Code: "ANCHOR_REQUIRED", Message: "balance anchor is required", Err: domain.ErrAnchorRequired}
-	}
+	snapshot, err := a.store.FinancialSnapshot(ctx, userID)
 	if err != nil {
-		return forecast.Output{}, anchor, err
+		return forecast.Output{}, domain.BalanceAnchor{}, err
 	}
-	settings, err := a.store.GetSettings(ctx, userID)
-	if err != nil {
-		return forecast.Output{}, anchor, err
+	output, err := forecast.CalculateContext(ctx, forecast.Input{Anchors: snapshot.Anchors, Settings: snapshot.Settings,
+		Events: snapshot.Events, Occurrences: snapshot.Occurrences, LegacyFacts: snapshot.LegacyFacts, Overrides: snapshot.Overrides, DayCosts: snapshot.DayCosts,
+		RangeFrom: from, RangeTo: to, AsOf: a.Now().UTC()})
+	var anchor domain.BalanceAnchor
+	if output.Anchor != nil {
+		anchor = *output.Anchor
 	}
-	events, err := a.store.ListEvents(ctx, userID)
-	if err != nil {
-		return forecast.Output{}, anchor, err
+	return output, anchor, err
+}
+
+func (a *App) ChangeOccurrence(ctx context.Context, userID, eventID uuid.UUID, date domain.CalendarDate, change domain.OccurrenceChange) (domain.OccurrenceResult, error) {
+	if change.Status != domain.OccurrenceConfirmed && change.Status != domain.OccurrencePlanned && change.Status != domain.OccurrenceCancelled {
+		return domain.OccurrenceResult{}, domain.Validation("status", "is invalid")
 	}
-	overrides, err := a.store.ListOverrides(ctx, userID)
-	if err != nil {
-		return forecast.Output{}, anchor, err
+	if change.Status != domain.OccurrenceConfirmed && (change.EffectiveAt != nil || change.CountsTowardDayBudget != nil) {
+		return domain.OccurrenceResult{}, domain.Validation("status", "execution fields are only allowed for CONFIRMED")
 	}
-	return forecast.Calculate(forecast.Input{
-		Anchor: anchor, Settings: settings, Events: events, Overrides: overrides,
-		RangeFrom: from, RangeTo: to, AsOf: a.Now().UTC(),
-	}), anchor, nil
+	change.Now = a.Now().UTC()
+	return a.store.ChangeOccurrence(ctx, userID, eventID, date, change)
 }

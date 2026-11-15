@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useForecast, useSaveSettings, useSettings } from '../../api/hooks'
 import type { HorizonPolicy } from '../../lib/horizon'
-import { Button, Field, Input, Modal, Select } from '../../components/ui'
+import { Button, ErrorNotice, Field, Input, Modal, Select } from '../../components/ui'
+import { errorMessage } from '../../api/client'
 import { useUIStore } from '../../stores/uiStore'
+import { currentSession, isCurrentSession } from '../../api/session'
 
 const policyOptions: { value: HorizonPolicy; label: string }[] = [
   { value: 'END_OF_MONTH', label: 'До конца месяца' },
@@ -28,12 +30,13 @@ export function HorizonModal() {
 
   const save = async () => {
     if (!settings) return
+    const session = currentSession()
     await saveSettings.mutateAsync({
       horizon_policy: policy,
       horizon_custom_date: policy === 'CUSTOM_DATE' ? customDate : null,
       base_day_cost: settings.base_day_cost,
     })
-    setHorizonOpen(false)
+    if (isCurrentSession(session)) setHorizonOpen(false)
   }
 
   return (
@@ -58,11 +61,12 @@ export function HorizonModal() {
             <Input type="date" value={customDate} onChange={(event) => setCustomDate(event.target.value)} />
           </Field>
         ) : null}
+        {saveSettings.error && <ErrorNotice>{errorMessage(saveSettings.error)}</ErrorNotice>}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setHorizonOpen(false)}>
             Отмена
           </Button>
-          <Button onClick={() => void save()} disabled={saveSettings.isPending || (policy === 'CUSTOM_DATE' && !customDate)}>
+          <Button onClick={() => void save().catch(() => undefined)} disabled={saveSettings.isPending || (policy === 'CUSTOM_DATE' && !customDate)}>
             Сохранить
           </Button>
         </div>

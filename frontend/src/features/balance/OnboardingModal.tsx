@@ -26,7 +26,7 @@ const schema = z
   })
 type FormData = z.infer<typeof schema>
 
-export function OnboardingModal({ open }: { open: boolean }) {
+export function OnboardingModal({ open, onClose }: { open: boolean; onClose?: () => void }) {
   const saveSettings = useSaveSettings()
   const setAnchor = useSetAnchor()
   const { register, handleSubmit, watch, formState: { errors } } = useForm<FormData>({
@@ -47,13 +47,13 @@ export function OnboardingModal({ open }: { open: boolean }) {
   }
 
   return (
-    <Modal open={open} title="Настроим ваш прогноз">
+    <Modal open={open} title="Настроим ваш прогноз" onClose={onClose}>
       <div className="mb-6 rounded-2xl bg-teal-800 p-5 text-white">
         <Sparkles className="mb-3 text-amber-300" size={24} />
         <p className="font-bold">Три параметра — и всё готово</p>
         <p className="mt-1 text-sm leading-5 text-teal-100">Баланс, стоимость дня и горизонт определяют «деньги на жизнь» и цифры в календаре.</p>
       </div>
-      <form className="grid gap-5" onSubmit={handleSubmit(submit)}>
+      <form className="grid gap-5" onSubmit={handleSubmit((data) => submit(data).catch(() => undefined))}>
         <Field label="Текущий баланс, ₽" error={errors.balance?.message} hint="Сколько денег доступно прямо сейчас">
           <Input inputMode="decimal" placeholder="85 000" autoFocus {...register('balance')} />
         </Field>
@@ -78,6 +78,7 @@ export function OnboardingModal({ open }: { open: boolean }) {
         <Button type="submit" disabled={pending} className="w-full">
           <CheckCircle2 size={17} /> {pending ? 'Сохраняем…' : 'Начать планировать'}
         </Button>
+        {onClose && <Button type="button" variant="ghost" onClick={onClose}>Позже — перейти к календарю</Button>}
       </form>
     </Modal>
   )

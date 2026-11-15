@@ -35,7 +35,7 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	if _, err = db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+	if _, err = db.Exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000"); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -73,6 +73,9 @@ func (s *Store) ProvisionUser(ctx context.Context, login string) (domain.User, e
 		return domain.User{}, err
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO settings(user_id,base_day_cost,horizon_policy,currency,updated_at) VALUES(?,0,'END_OF_MONTH','RUB',?)`, user.ID, now); err != nil {
+		return domain.User{}, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO base_day_cost_history(user_id,effective_from,amount) VALUES(?,'0001-01-01',0)`, user.ID); err != nil {
 		return domain.User{}, err
 	}
 	defaults := []struct {
@@ -124,30 +127,81 @@ func (s *Store) GetSettings(ctx context.Context, userID uuid.UUID) (domain.UserS
 }
 
 func (s *Store) UpdateSettings(ctx context.Context, value domain.UserSettings) error {
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var oldAmount int64
+	if err = tx.QueryRowContext(ctx, `SELECT base_day_cost FROM settings WHERE user_id=?`, value.UserID).Scan(&oldAmount); err != nil {
+		return normalize(err)
+	}
 	var custom any
 	if value.HorizonCustomDate != nil {
 		custom = value.HorizonCustomDate.String()
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE settings SET base_day_cost=?,horizon_policy=?,horizon_custom_date=?,currency=?,updated_at=? WHERE user_id=?`,
+	result, err := tx.ExecContext(ctx, `UPDATE settings SET base_day_cost=?,horizon_policy=?,horizon_custom_date=?,currency=?,updated_at=? WHERE user_id=?`,
 		value.BaseDayCost.Amount, value.HorizonPolicy, custom, value.Currency, value.UpdatedAt.UTC(), value.UserID)
-	return affected(result, err)
+	if err = affected(result, err); err != nil {
+		return err
+	}
+	if oldAmount != value.BaseDayCost.Amount {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO base_day_cost_history(user_id,effective_from,amount) VALUES(?,?,?)`, value.UserID, domain.DateFromTime(value.UpdatedAt).String(), value.BaseDayCost.Amount); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) CreateAnchor(ctx context.Context, value domain.BalanceAnchor) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO anchors(id,user_id,amount,anchored_at,created_at) VALUES(?,?,?,?,?)`,
-		value.ID, value.UserID, value.Amount.Amount, value.AnchoredAt.UTC(), value.CreatedAt.UTC())
-	return err
+	tx, err := s.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	sequence, err := nextSequence(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO anchors(id,user_id,amount,anchored_at,created_at,sequence) VALUES(?,?,?,?,?,?)`,
+		value.ID, value.UserID, value.Amount.Amount, value.AnchoredAt.UTC(), value.CreatedAt.UTC(), sequence); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE settings SET needs_balance_review=0 WHERE user_id=?`, value.UserID); err != nil {
+		return err
+	}
+	if err = validateLedger(ctx, tx, value.UserID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) LatestAnchor(ctx context.Context, userID uuid.UUID) (domain.BalanceAnchor, error) {
 	var value domain.BalanceAnchor
-	err := s.db.QueryRowContext(ctx, `SELECT id,user_id,amount,anchored_at,created_at FROM anchors WHERE user_id=? ORDER BY anchored_at DESC,created_at DESC LIMIT 1`, userID).
-		Scan(&value.ID, &value.UserID, &value.Amount.Amount, &value.AnchoredAt, &value.CreatedAt)
-	value.Amount.Currency = "RUB"
-	if errors.Is(err, sql.ErrNoRows) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id,user_id,amount,anchored_at,created_at,sequence FROM anchors WHERE user_id=?`, userID)
+	if err != nil {
+		return value, err
+	}
+	defer rows.Close()
+	found := false
+	for rows.Next() {
+		var a domain.BalanceAnchor
+		if err = rows.Scan(&a.ID, &a.UserID, &a.Amount.Amount, &a.AnchoredAt, &a.CreatedAt, &a.Sequence); err != nil {
+			return value, err
+		}
+		if !found || a.AnchoredAt.After(value.AnchoredAt) || (a.AnchoredAt.Equal(value.AnchoredAt) && a.Sequence > value.Sequence) {
+			value = a
+			found = true
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return value, err
+	}
+	if !found {
 		return value, domain.ErrAnchorRequired
 	}
-	return value, err
+	value.Amount.Currency = "RUB"
+	return value, nil
 }
 
 func eventArgs(value domain.FinancialEvent) []any {
@@ -185,12 +239,12 @@ func (s *Store) UpdateEvent(ctx context.Context, value domain.FinancialEvent) er
 	}
 	args := eventArgs(value)
 	args = append(args, value.ID, value.UserID)
-	result, err := s.db.ExecContext(ctx, `UPDATE financial_events SET kind=?,necessity=?,amount=?,category_id=?,comment=?,recurrence_type=?,start_date=?,day_of_month=?,interval_days=?,until_date=?,updated_at=? WHERE id=? AND user_id=?`, args...)
+	result, err := s.db.ExecContext(ctx, `UPDATE financial_events SET kind=?,necessity=?,amount=?,category_id=?,comment=?,recurrence_type=?,start_date=?,day_of_month=?,interval_days=?,until_date=?,updated_at=? WHERE id=? AND user_id=? AND deleted_at IS NULL`, args...)
 	return affected(result, err)
 }
 
 func (s *Store) DeleteEvent(ctx context.Context, userID, id uuid.UUID) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM financial_events WHERE id=? AND user_id=?`, id, userID)
+	result, err := s.db.ExecContext(ctx, `UPDATE financial_events SET deleted_at=CURRENT_TIMESTAMP WHERE id=? AND user_id=? AND deleted_at IS NULL`, id, userID)
 	return affected(result, err)
 }
 
@@ -240,11 +294,11 @@ func scanEvent(row scanner) (domain.FinancialEvent, error) {
 const eventSelect = `SELECT id,user_id,kind,necessity,amount,category_id,comment,recurrence_type,start_date,day_of_month,interval_days,until_date,created_at,updated_at FROM financial_events`
 
 func (s *Store) GetEvent(ctx context.Context, userID, id uuid.UUID) (domain.FinancialEvent, error) {
-	return scanEvent(s.db.QueryRowContext(ctx, eventSelect+` WHERE id=? AND user_id=?`, id, userID))
+	return scanEvent(s.db.QueryRowContext(ctx, eventSelect+` WHERE id=? AND user_id=? AND deleted_at IS NULL`, id, userID))
 }
 
 func (s *Store) ListEvents(ctx context.Context, userID uuid.UUID) ([]domain.FinancialEvent, error) {
-	rows, err := s.db.QueryContext(ctx, eventSelect+` WHERE user_id=? ORDER BY created_at,id`, userID)
+	rows, err := s.db.QueryContext(ctx, eventSelect+` WHERE user_id=? AND deleted_at IS NULL ORDER BY created_at,id`, userID)
 	if err != nil {
 		return nil, err
 	}

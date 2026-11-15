@@ -1,5 +1,7 @@
 # 5. REST API
 
+Дополнения API план/факт, nullable календаря, SALARY и сверки остатка определены в [CONTRACT.md](../delivery/CONTRACT.md). Для этих полей и новых endpoints контракт имеет приоритет над исходными примерами ниже.
+
 Base URL: `/api/v1`
 
 Идентификация MVP: header `Authorization: Bearer <user_uuid>` (UUID выдаётся при

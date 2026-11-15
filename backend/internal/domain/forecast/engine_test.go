@@ -53,7 +53,7 @@ func TestCalculateBoundariesAndNecessity(t *testing.T) {
 		{
 			name:        "anchor day is unchanged but current day cost is reserved",
 			input:       baseInput("2026-07-10T09:00:00Z", "2026-07-10T08:00:00Z", 10_000, 1_000, domain.HorizonCustomDate, "2026-07-10"),
-			wantBalance: 10_000, wantMFL: 10_000, wantDayCost: 1_000, wantDays: 1,
+			wantBalance: 10_000, wantMFL: 9_000, wantDayCost: 1_000, wantDays: 1,
 		},
 		{
 			name: "next income date and income are excluded",
@@ -62,12 +62,12 @@ func TestCalculateBoundariesAndNecessity(t *testing.T) {
 				value.Events = []domain.FinancialEvent{event(domain.EventKindIncome, domain.NecessityRequired, 50_000, "2026-07-12")}
 				return value
 			}(),
-			wantBalance: 10_000, wantMFL: 9_000, wantDayCost: 2_000, wantDays: 2,
+			wantBalance: 10_000, wantMFL: 8_000, wantDayCost: 2_000, wantDays: 2,
 		},
 		{
 			name:        "end of month includes last day",
 			input:       baseInput("2026-07-30T09:00:00Z", "2026-07-30T08:00:00Z", 10_000, 1_000, domain.HorizonEndOfMonth, ""),
-			wantBalance: 10_000, wantMFL: 9_000, wantDayCost: 2_000, wantDays: 2,
+			wantBalance: 10_000, wantMFL: 8_000, wantDayCost: 2_000, wantDays: 2,
 		},
 		{
 			name: "required affects MFL optional is informational",
@@ -79,7 +79,19 @@ func TestCalculateBoundariesAndNecessity(t *testing.T) {
 				}
 				return value
 			}(),
-			wantBalance: 10_000, wantMFL: 10_000, wantRequired: 2_000, wantOptional: 3_000, wantDays: 1,
+			wantBalance: 10_000, wantMFL: 8_000, wantRequired: 2_000, wantOptional: 3_000, wantDays: 1,
+		},
+		{
+			name: "anchor-day plans change forecast only",
+			input: func() Input {
+				value := baseInput("2026-07-10T09:00:00Z", "2026-07-10T08:00:00Z", 10_000, 1_000, domain.HorizonCustomDate, "2026-07-10")
+				value.Events = []domain.FinancialEvent{
+					event(domain.EventKindIncome, domain.NecessityRequired, 8_700, "2026-07-10"),
+					event(domain.EventKindExpense, domain.NecessityRequired, 1_500, "2026-07-10"),
+				}
+				return value
+			}(),
+			wantBalance: 10_000, wantMFL: 16_200, wantDayCost: 1_000, wantRequired: 1_500, wantDays: 1,
 		},
 	}
 	for _, test := range tests {
@@ -94,7 +106,7 @@ func TestCalculateBoundariesAndNecessity(t *testing.T) {
 	}
 }
 
-func TestMoneyForLifeMatchesProjectedBalanceAtHorizon(t *testing.T) {
+func TestMoneyForLifeSeparatesOptionalPlansAtHorizon(t *testing.T) {
 	overrides := []domain.DayCostOverride{
 		{DateFrom: date("2026-07-14"), DateTo: date("2026-07-17"), DailyAmount: domain.Rub(50_000), CreatedAt: at("2026-07-12T00:00:00Z")},
 	}
@@ -111,21 +123,99 @@ func TestMoneyForLifeMatchesProjectedBalanceAtHorizon(t *testing.T) {
 		RangeFrom: date("2026-07-12"), RangeTo: date("2026-07-17"), AsOf: at("2026-07-12T12:00:00Z"),
 	}
 	output := Calculate(input)
-	if output.Summary.MoneyForLife.Amount != 460_000 {
-		t.Fatalf("expected projected balance 460000 at horizon, got %+v", output.Summary.MoneyForLife)
+	if output.Summary.MoneyForLife.Amount != 3_320_000 {
+		t.Fatalf("expected MFL 3320000 excluding optional plans, got %+v", output.Summary.MoneyForLife)
 	}
 	day := output.Days[len(output.Days)-1]
-	if day.ExpectedBalance.Amount != 460_000 || day.Date.String() != "2026-07-17" {
+	if day.ExpectedBalance.Amount != 320_000 || day.Date.String() != "2026-07-17" {
 		t.Fatalf("unexpected horizon day: %+v", day)
 	}
 }
 
-func TestAnchorAdjustmentsBeginNextCalendarDay(t *testing.T) {
+func TestAnchorDayCostBeginsNextCalendarDay(t *testing.T) {
 	input := baseInput("2026-07-11T09:00:00Z", "2026-07-10T08:00:00Z", 1_000, 100, domain.HorizonCustomDate, "2026-07-11")
 	input.RangeFrom, input.RangeTo = date("2026-07-10"), date("2026-07-11")
 	output := Calculate(input)
 	if len(output.Days) != 2 || output.Days[0].ExpectedBalance.Amount != 1_000 || output.Days[1].ExpectedBalance.Amount != 900 {
 		t.Fatalf("unexpected projections: %+v", output.Days)
+	}
+}
+
+func TestAnchorDayEventsAffectNextDayBalance(t *testing.T) {
+	input := baseInput("2026-07-11T09:00:00Z", "2026-07-10T08:00:00Z", 10_000, 400, domain.HorizonCustomDate, "2026-07-11")
+	input.RangeFrom, input.RangeTo = date("2026-07-10"), date("2026-07-11")
+	input.Events = []domain.FinancialEvent{
+		event(domain.EventKindIncome, domain.NecessityRequired, 8_700, "2026-07-10"),
+	}
+	fact := domain.PlannedOccurrence(input.Events[0], date("2026-07-10"))
+	executed := at("2026-07-10T09:00:00Z")
+	fact.Status = domain.OccurrenceConfirmed
+	fact.EffectiveAt = &executed
+	fact.Sequence = 1
+	input.Occurrences = []domain.EventOccurrence{fact}
+	output := Calculate(input)
+	if len(output.Days) != 2 {
+		t.Fatalf("unexpected day count: %+v", output.Days)
+	}
+	if output.Days[0].ExpectedBalance.Amount != 18_700 {
+		t.Fatalf("anchor-day balance: got %d want 18700", output.Days[0].ExpectedBalance.Amount)
+	}
+	if output.Days[1].ExpectedBalance.Amount != 18_300 {
+		t.Fatalf("next-day balance: got %d want 18300", output.Days[1].ExpectedBalance.Amount)
+	}
+	if output.Summary.CurrentBalance.Amount != 18_700 {
+		t.Fatalf("current factual balance: got %d want 18700", output.Summary.CurrentBalance.Amount)
+	}
+}
+
+func TestPreAnchorPlansDoNotChangeBalanceOrInventHistory(t *testing.T) {
+	input := baseInput("2026-07-11T09:00:00Z", "2026-07-11T08:00:00Z", 10_000, 400, domain.HorizonCustomDate, "2026-07-11")
+	input.RangeFrom, input.RangeTo = date("2026-07-10"), date("2026-07-11")
+	input.Events = []domain.FinancialEvent{
+		event(domain.EventKindExpense, domain.NecessityRequired, 1_500, "2026-07-10"),
+	}
+	output := Calculate(input)
+	if len(output.Days) != 2 {
+		t.Fatalf("unexpected day count: %+v", output.Days)
+	}
+	if output.Days[0].ExpectedBalance != nil {
+		t.Fatalf("pre-anchor history must be unknown: %+v", output.Days[0])
+	}
+	if output.Days[1].ExpectedBalance.Amount != 9_600 {
+		t.Fatalf("anchor-day forecast: got %d want 9600", output.Days[1].ExpectedBalance.Amount)
+	}
+	if output.Summary.CurrentBalance.Amount != 10_000 {
+		t.Fatalf("current balance: got %d want 10000", output.Summary.CurrentBalance.Amount)
+	}
+}
+
+func TestOverduePlansStayOutOfTodayForecast(t *testing.T) {
+	input := baseInput("2026-07-11T09:00:00Z", "2026-07-11T08:00:00Z", 10_000, 400, domain.HorizonCustomDate, "2026-07-11")
+	input.Events = []domain.FinancialEvent{
+		event(domain.EventKindExpense, domain.NecessityRequired, 1_500, "2026-07-10"),
+		event(domain.EventKindIncome, domain.NecessityRequired, 700, "2026-07-09"),
+	}
+	output := Calculate(input)
+	if output.Summary.CurrentBalance.Amount != 10_000 {
+		t.Fatalf("current balance: got %d want 10000", output.Summary.CurrentBalance.Amount)
+	}
+	if len(output.Days) != 1 || output.Days[0].Date.String() != "2026-07-11" {
+		t.Fatalf("today-only range should emit one day: %+v", output.Days)
+	}
+	if output.Days[0].ExpectedBalance.Amount != 9_600 {
+		t.Fatalf("today projection: got %d want 9600", output.Days[0].ExpectedBalance.Amount)
+	}
+}
+
+func TestCalendarIncludesDaysBeforeAnchor(t *testing.T) {
+	input := baseInput("2026-07-11T09:00:00Z", "2026-07-11T08:00:00Z", 10_000, 100, domain.HorizonCustomDate, "2026-07-11")
+	input.RangeFrom, input.RangeTo = date("2026-07-09"), date("2026-07-11")
+	output := Calculate(input)
+	if len(output.Days) != 3 {
+		t.Fatalf("expected 3 calendar days before/on anchor, got %+v", output.Days)
+	}
+	if output.Days[0].Date.String() != "2026-07-09" || output.Days[0].ExpectedBalance != nil {
+		t.Fatalf("unexpected pre-anchor projection: %+v", output.Days[0])
 	}
 }
 

@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 type migration struct {
@@ -119,10 +121,43 @@ func applyNextMigration(ctx context.Context, db *sql.DB, items []migration) (boo
 	if _, err = tx.ExecContext(ctx, next.script); err != nil {
 		return false, fmt.Errorf("migration %s: %w", next.name, err)
 	}
+	if next.name == "003_financial_ledger.sql" {
+		if err = validateMigratedLedgers(ctx, tx); err != nil {
+			return false, fmt.Errorf("migration %s: legacy ledger validation: %w", next.name, err)
+		}
+	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations(version,name,checksum) VALUES(?,?,?)`, next.version, next.name, next.checksum); err != nil {
 		return false, fmt.Errorf("record migration %s: %w", next.name, err)
 	}
 	return false, tx.Commit()
+}
+
+func validateMigratedLedgers(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT user_id FROM anchors`)
+	if err != nil {
+		return err
+	}
+	var users []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err = rows.Scan(&id); err != nil {
+			break
+		}
+		users = append(users, id)
+	}
+	if err == nil {
+		err = rows.Err()
+	}
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, id := range users {
+		if err = validateLedger(ctx, tx, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type schemaReader interface {

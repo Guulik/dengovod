@@ -46,7 +46,7 @@ type CalendarDate struct {
 
 func ParseDate(value string) (CalendarDate, error) {
 	t, err := time.Parse("2006-01-02", value)
-	if err != nil {
+	if err != nil || t.Year() < 1 {
 		return CalendarDate{}, Validation("date", "must be YYYY-MM-DD")
 	}
 	return CalendarDate{Year: t.Year(), Month: int(t.Month()), Day: t.Day()}, nil
@@ -125,6 +125,7 @@ type BalanceAnchor struct {
 	Amount     Money
 	AnchoredAt time.Time
 	CreatedAt  time.Time
+	Sequence   int64
 }
 
 const CategorySystemSalary = "SALARY"
@@ -160,20 +161,58 @@ type DayCostOverride struct {
 	CreatedAt   time.Time
 }
 type EventOccurrence struct {
-	EventID      uuid.UUID
-	Date         CalendarDate
-	Kind         EventKind
-	Necessity    EventNecessity
-	Amount       Money
-	CategoryID   *uuid.UUID
-	Comment      string
-	IsOverridden bool
+	EventID               uuid.UUID
+	Date                  CalendarDate
+	Kind                  EventKind
+	Necessity             EventNecessity
+	Amount                Money
+	CategoryID            *uuid.UUID
+	Comment               string
+	IsOverridden          bool
+	Status                OccurrenceStatus
+	EffectiveAt           *time.Time
+	Sequence              int64
+	CountsTowardDayBudget bool
+	SeriesDeleted         bool
+}
+type OccurrenceStatus string
+
+const (
+	OccurrencePlanned   OccurrenceStatus = "PLANNED"
+	OccurrenceConfirmed OccurrenceStatus = "CONFIRMED"
+	OccurrenceCancelled OccurrenceStatus = "CANCELLED"
+)
+
+type OccurrenceChange struct {
+	Status                OccurrenceStatus
+	EffectiveAt           *time.Time
+	CountsTowardDayBudget *bool
+	Now                   time.Time
+}
+type OccurrenceResult struct {
+	EventOccurrence
+	PlanRestored bool
+}
+type DayCostVersion struct {
+	ID            int64
+	EffectiveFrom CalendarDate
+	Amount        Money
+}
+type FinancialSnapshot struct {
+	Settings           UserSettings
+	Anchors            []BalanceAnchor
+	Events             []FinancialEvent
+	Occurrences        []EventOccurrence
+	LegacyFacts        []EventOccurrence
+	Overrides          []DayCostOverride
+	DayCosts           []DayCostVersion
+	NeedsBalanceReview bool
 }
 type DayProjection struct {
 	Date            CalendarDate
-	ExpectedBalance Money
+	ExpectedBalance *Money
 	DayCost         Money
-	MoneyForLife    Money
+	MoneyForLife    *Money
 	Events          []EventOccurrence
 	RequiredTotal   Money
 	OptionalTotal   Money
@@ -190,14 +229,15 @@ type ForecastSummary struct {
 	DaysUntilHorizon  int
 }
 type BalanceState struct {
-	Anchor          BalanceAnchor
-	ComputedBalance Money
-	AsOf            time.Time
+	Anchor             BalanceAnchor
+	ComputedBalance    Money
+	AsOf               time.Time
+	NeedsBalanceReview bool
 }
 
 func ValidateSettings(s UserSettings) error {
-	if s.BaseDayCost.Amount < 0 {
-		return Validation("base_day_cost", "must be >= 0")
+	if s.BaseDayCost.Amount < 0 || s.BaseDayCost.Amount > MaxMoney {
+		return Validation("base_day_cost", "must be between 0 and 9007199254740991")
 	}
 	switch s.HorizonPolicy {
 	case HorizonEndOfMonth, HorizonNextIncome:
@@ -212,8 +252,8 @@ func ValidateSettings(s UserSettings) error {
 }
 
 func ValidateEvent(e FinancialEvent) error {
-	if e.Amount.Amount <= 0 {
-		return Validation("amount", "must be > 0")
+	if e.Amount.Amount <= 0 || e.Amount.Amount > MaxMoney {
+		return Validation("amount", "must be between 1 and 9007199254740991")
 	}
 	if e.Kind != EventKindIncome && e.Kind != EventKindExpense {
 		return Validation("kind", "is invalid")
@@ -244,8 +284,8 @@ func ValidateOverride(o DayCostOverride) error {
 	if o.DateTo.Before(o.DateFrom) {
 		return Validation("date_to", "must not precede date_from")
 	}
-	if o.DailyAmount.Amount < 0 {
-		return Validation("daily_amount", "must be >= 0")
+	if o.DailyAmount.Amount < 0 || o.DailyAmount.Amount > MaxMoney {
+		return Validation("daily_amount", "must be between 0 and 9007199254740991")
 	}
 	return nil
 }

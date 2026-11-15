@@ -112,3 +112,82 @@ func TestHTTPVerticalSlice(t *testing.T) {
 		t.Fatalf("unexpected calendar: %s", calendar.Body.String())
 	}
 }
+
+func TestPastPlanKeepsBalanceAndCalendarHistoryUnknown(t *testing.T) {
+	store, err := sqlite.Open(filepath.Join(t.TempDir(), "past.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	app := service.New(store)
+	app.Now = func() time.Time { return time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC) }
+	router := NewRouter(app)
+
+	call := func(method, path, token string, body any) *httptest.ResponseRecorder {
+		t.Helper()
+		var data []byte
+		if body != nil {
+			data, _ = json.Marshal(body)
+		}
+		request := httptest.NewRequest(method, path, bytes.NewReader(data))
+		request.Header.Set("Content-Type", "application/json")
+		if token != "" {
+			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		return response
+	}
+	decodeBody := func(response *httptest.ResponseRecorder) map[string]any {
+		t.Helper()
+		var value map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &value); err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+
+	login := call(http.MethodPost, "/api/v1/auth/login", "", map[string]any{"login": "anna"})
+	token := decodeBody(login)["token"].(string)
+
+	if code := call(http.MethodPost, "/api/v1/balance/anchor", token, map[string]any{
+		"amount": map[string]any{"amount": 10_000, "currency": "RUB"}, "anchored_at": "2026-07-11T08:00:00Z",
+	}).Code; code != http.StatusCreated {
+		t.Fatalf("anchor: %d", code)
+	}
+
+	if code := call(http.MethodPost, "/api/v1/events", token, map[string]any{
+		"kind": "EXPENSE", "necessity": "REQUIRED",
+		"amount": map[string]any{"amount": 1_500, "currency": "RUB"}, "comment": "yesterday",
+		"recurrence": map[string]any{"type": "NONE", "start_date": "2026-07-10"},
+	}).Code; code != http.StatusCreated {
+		t.Fatalf("event: %d", code)
+	}
+
+	balance := call(http.MethodGet, "/api/v1/balance", token, nil)
+	if balance.Code != http.StatusOK {
+		t.Fatalf("balance: %d %s", balance.Code, balance.Body.String())
+	}
+	if got := decodeBody(balance)["computed_balance"].(map[string]any)["amount"].(float64); got != 10_000 {
+		t.Fatalf("computed balance: got %v want 10000", got)
+	}
+
+	calendar := call(http.MethodGet, "/api/v1/calendar?from=2026-07-09&to=2026-07-11", token, nil)
+	if calendar.Code != http.StatusOK {
+		t.Fatalf("calendar: %d %s", calendar.Code, calendar.Body.String())
+	}
+	days := decodeBody(calendar)["days"].([]any)
+	if len(days) != 3 {
+		t.Fatalf("expected 3 calendar days, got %d: %s", len(days), calendar.Body.String())
+	}
+	past := days[1].(map[string]any)
+	if past["date"] != "2026-07-10" {
+		t.Fatalf("expected past day 2026-07-10, got %v", past["date"])
+	}
+	if past["expected_balance"] != nil {
+		t.Fatalf("past day balance: %+v", past["expected_balance"])
+	}
+	if len(past["events"].([]any)) != 1 {
+		t.Fatalf("past day should list the expense: %+v", past["events"])
+	}
+}
