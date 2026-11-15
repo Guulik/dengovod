@@ -247,3 +247,50 @@ func TestUnsafeLegacyMoneyFailsMigrationWithoutTruncation(t *testing.T) {
 		t.Fatalf("failed migration left DDL: %v", got)
 	}
 }
+
+func TestAccumulatedLegacyOverflowRollsBackEntireV3(t *testing.T) {
+	for _, laterAnchor := range []bool{false, true} {
+		t.Run(map[bool]string{false: "current-segment", true: "historical-segment"}[laterAnchor], func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "legacy-accumulated.db")
+			db := migrationDB(t, path)
+			initial, err := fs.ReadFile(migrations, "migrations/001_initial.sql")
+			if err != nil {
+				t.Fatal(err)
+			}
+			execSQL(t, db, string(initial))
+			execSQL(t, db, `INSERT INTO users VALUES('11111111-1111-1111-1111-111111111111','legacy-overflow','2026-07-01T00:00:00Z');
+ INSERT INTO settings VALUES('11111111-1111-1111-1111-111111111111',0,'END_OF_MONTH',NULL,'RUB','2026-07-11T00:00:00Z');
+ INSERT INTO anchors VALUES('22222222-2222-2222-2222-222222222222','11111111-1111-1111-1111-111111111111',9007199254740990,'2026-07-10T09:00:00Z','2026-07-10T09:00:00Z');
+ INSERT INTO actual_transactions VALUES('33333333-3333-3333-3333-333333333333','11111111-1111-1111-1111-111111111111','INCOME',2,NULL,'2026-07-11','safe row, unsafe accumulation',NULL,'2026-07-11T09:00:00Z');`)
+			if laterAnchor {
+				execSQL(t, db, `INSERT INTO anchors VALUES('44444444-4444-4444-4444-444444444444','11111111-1111-1111-1111-111111111111',1000,'2026-07-12T09:00:00Z','2026-07-12T09:00:00Z');`)
+			}
+			queries := []string{`SELECT * FROM anchors ORDER BY id`, `SELECT * FROM settings`, `SELECT * FROM actual_transactions`}
+			before := make([][]string, len(queries))
+			for i, q := range queries {
+				before[i] = snapshot(t, db, q)
+			}
+			for attempt := 0; attempt < 2; attempt++ {
+				s, err := Open(path)
+				if err == nil {
+					s.Close()
+					t.Fatal("accumulated legacy overflow accepted")
+				}
+				if !errors.Is(err, domain.ErrConflict) || !strings.Contains(err.Error(), "legacy ledger validation") {
+					t.Fatalf("unclear migration error: %v", err)
+				}
+				for i, q := range queries {
+					if got := snapshot(t, db, q); strings.Join(got, "\n") != strings.Join(before[i], "\n") {
+						t.Fatalf("v3 rollback changed %s: %v -> %v", q, before[i], got)
+					}
+				}
+				if got := snapshot(t, db, `SELECT name FROM sqlite_schema WHERE name IN ('legacy_facts','ledger_clock','occurrence_states','base_day_cost_history')`); len(got) != 0 {
+					t.Fatalf("failed v3 left tables: %v", got)
+				}
+				if got := snapshot(t, db, `SELECT version FROM schema_migrations WHERE version=3`); len(got) != 0 {
+					t.Fatalf("failed v3 recorded as applied: %v", got)
+				}
+			}
+		})
+	}
+}

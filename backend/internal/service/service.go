@@ -185,6 +185,9 @@ func (a *App) Calendar(ctx context.Context, userID uuid.UUID, from, to domain.Ca
 	if domain.DaysBetween(from, to) >= 366 {
 		return forecast.Output{}, domain.Validation("to", "calendar range must not exceed 366 days")
 	}
+	if domain.DaysBetween(domain.DateFromTime(a.Now()), to) > forecast.MaxForecastDays {
+		return forecast.Output{}, domain.Validation("to", "calendar must not extend more than 3660 days from today")
+	}
 	output, _, err := a.calculate(ctx, userID, from, to)
 	return output, err
 }

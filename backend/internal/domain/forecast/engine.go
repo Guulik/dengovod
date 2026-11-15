@@ -25,9 +25,21 @@ type Output struct {
 	Anchor  *domain.BalanceAnchor
 }
 
+const MaxForecastDays = 3660
+const maxExpandedOccurrences = 200000
+
+func forecastLimit(today domain.CalendarDate) domain.CalendarDate {
+	limit := today.AddDays(MaxForecastDays)
+	if limit.Year > 9999 {
+		return domain.CalendarDate{Year: 9999, Month: 12, Day: 31}
+	}
+	return limit
+}
+
 func key(o domain.EventOccurrence) string { return o.EventID.String() + ":" + o.Date.String() }
 func expand(ctx context.Context, events []domain.FinancialEvent, from, to domain.CalendarDate) (map[string][]domain.EventOccurrence, error) {
 	result := map[string][]domain.EventOccurrence{}
+	count := 0
 	for _, event := range events {
 		for cursor := from; !cursor.After(to); {
 			if err := ctx.Err(); err != nil {
@@ -36,6 +48,10 @@ func expand(ctx context.Context, events []domain.FinancialEvent, from, to domain
 			d, ok := domain.NextOccurrence(event.Recurrence, cursor)
 			if !ok || d.After(to) {
 				break
+			}
+			count++
+			if count > maxExpandedOccurrences {
+				return nil, domain.Validation("range", "calculation contains too many occurrences")
 			}
 			result[d.String()] = append(result[d.String()], domain.PlannedOccurrence(event, d))
 			if d.Year == 9999 && d.Month == 12 && d.Day == 31 {
@@ -83,8 +99,12 @@ func dayCost(date domain.CalendarDate, input Input) domain.Money {
 }
 func resolveHorizon(ctx context.Context, input Input, states map[string]domain.EventOccurrence) (domain.CalendarDate, bool, error) {
 	today := domain.DateFromTime(input.AsOf)
+	limit := forecastLimit(today)
 	end := domain.CalendarDate{Year: today.Year, Month: today.Month, Day: time.Date(today.Year, time.Month(today.Month)+1, 0, 0, 0, 0, 0, domain.Moscow).Day()}
 	if input.Settings.HorizonPolicy == domain.HorizonCustomDate && input.Settings.HorizonCustomDate != nil {
+		if input.Settings.HorizonCustomDate.After(limit) {
+			return limit, true, nil
+		}
 		return *input.Settings.HorizonCustomDate, true, nil
 	}
 	if input.Settings.HorizonPolicy == domain.HorizonNextIncome {
@@ -99,7 +119,7 @@ func resolveHorizon(ctx context.Context, input Input, states map[string]domain.E
 					return end, true, err
 				}
 				d, ok := domain.NextOccurrence(event.Recurrence, cursor)
-				if !ok {
+				if !ok || d.After(limit) {
 					break
 				}
 				if _, excluded := states[key(domain.PlannedOccurrence(event, d))]; !excluded {
@@ -221,6 +241,13 @@ func Calculate(input Input) Output {
 }
 func CalculateContext(ctx context.Context, input Input) (Output, error) {
 	var output Output
+	today := domain.DateFromTime(input.AsOf)
+	if input.RangeTo.Before(input.RangeFrom) || domain.DaysBetween(input.RangeFrom, input.RangeTo) >= 366 {
+		return output, domain.Validation("range", "calendar range must contain at most 366 days")
+	}
+	if input.RangeTo.After(forecastLimit(today)) {
+		return output, domain.Validation("to", "calendar must not extend more than 3660 days from today")
+	}
 	states := map[string]domain.EventOccurrence{}
 	for _, o := range input.Occurrences {
 		states[key(o)] = o
@@ -233,7 +260,6 @@ func CalculateContext(ctx context.Context, input Input) (Output, error) {
 	if !inclusive {
 		last = last.AddDays(-1)
 	}
-	today := domain.DateFromTime(input.AsOf)
 	from := input.RangeFrom
 	if today.Before(from) {
 		from = today
@@ -248,9 +274,27 @@ func CalculateContext(ctx context.Context, input Input) (Output, error) {
 	if err = ctx.Err(); err != nil {
 		return output, err
 	}
-	plan, err := expand(ctx, input.Events, from, to)
+	// Materialize only the requested historical window and the bounded future.
+	// Ledger points and a sparse transform bridge any invisible historical gap.
+	plan, err := expand(ctx, input.Events, today, to)
 	if err != nil {
 		return output, err
+	}
+	historyTo := input.RangeTo
+	if !historyTo.Before(today) {
+		historyTo = today.AddDays(-1)
+	}
+	if input.RangeFrom.Before(today) {
+		history, err := expand(ctx, input.Events, input.RangeFrom, historyTo)
+		if err != nil {
+			return output, err
+		}
+		for date, items := range history {
+			plan[date] = items
+		}
+	}
+	visible := func(date domain.CalendarDate) bool {
+		return (!date.Before(today) && !date.After(to)) || (!date.Before(input.RangeFrom) && !date.After(historyTo))
 	}
 	for day, items := range plan {
 		filtered := []domain.EventOccurrence{}
@@ -275,7 +319,7 @@ func CalculateContext(ctx context.Context, input Input) (Output, error) {
 					break
 				}
 			}
-			if !found && !o.Date.Before(from) && !o.Date.After(to) {
+			if !found && visible(o.Date) {
 				plan[o.Date.String()] = append(plan[o.Date.String()], o)
 			}
 			continue
@@ -284,7 +328,7 @@ func CalculateContext(ctx context.Context, input Input) (Output, error) {
 			continue
 		}
 		d := domain.DateFromTime(*o.EffectiveAt)
-		if d.Before(from) || d.After(to) {
+		if !visible(d) {
 			continue
 		}
 		plan[d.String()] = append(plan[d.String()], o)
@@ -328,11 +372,27 @@ func CalculateContext(ctx context.Context, input Input) (Output, error) {
 	days := []calculationDay{}
 	summary := domain.ForecastSummary{CurrentBalance: domain.Rub(current), HorizonDate: horizon, HorizonPolicy: input.Settings.HorizonPolicy}
 	var summaryIncome int64
-	for d := from; !d.After(to); d = d.AddDays(1) {
+	dates := make([]domain.CalendarDate, 0, MaxForecastDays+367)
+	for d := input.RangeFrom; !d.After(historyTo); d = d.AddDays(1) {
+		dates = append(dates, d)
+	}
+	historyCount := len(dates)
+	for d := today; !d.After(to); d = d.AddDays(1) {
+		dates = append(dates, d)
+	}
+	for _, d := range dates {
 		if err = ctx.Err(); err != nil {
 			return Output{}, err
 		}
 		day := calculationDay{projection: domain.DayProjection{Date: d, DayCost: dayCost(d, input), Events: plan[d.String()], RequiredTotal: domain.Rub(0), OptionalTotal: domain.Rub(0), IncomeTotal: domain.Rub(0)}}
+		// A jump between the visible history and today must update actual state
+		// without assigning all intervening effects to today's ledger transform.
+		for pointIndex < len(ledger) && ledger[pointIndex].at.Before(d.Time()) {
+			if err = apply(ledger[pointIndex]); err != nil {
+				return Output{}, err
+			}
+			pointIndex++
+		}
 		for pointIndex < len(ledger) && ledger[pointIndex].at.Before(d.AddDays(1).Time()) {
 			p := ledger[pointIndex]
 			if err = apply(p); err != nil {
@@ -439,6 +499,20 @@ func CalculateContext(ctx context.Context, input Input) (Output, error) {
 		d := day.projection.Date
 		if day.projection.ExpectedBalance == nil {
 			break
+		}
+		if i == historyCount-1 && historyTo.Before(today.AddDays(-1)) && d.Before(last) {
+			gapTo := today.AddDays(-1)
+			if last.Before(gapTo) {
+				gapTo = last
+			}
+			gap, err := historicalGap(ctx, input, ledger, historyTo.AddDays(1), gapTo)
+			if err != nil {
+				return Output{}, err
+			}
+			suffix, err = compose(gap, suffix)
+			if err != nil {
+				return Output{}, err
+			}
 		}
 		if day.projection.ExpectedBalance != nil {
 			value := day.projection.ExpectedBalance.Amount

@@ -70,7 +70,7 @@ type overrideRequest struct {
 func NewRouter(app *service.App) http.Handler {
 	h := &handler{app: app}
 	r := chi.NewRouter()
-	r.Use(recoverer, cors)
+	r.Use(recoverer, cors, requestDeadline)
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/auth/login", h.login)
 		r.Group(func(r chi.Router) {
@@ -106,6 +106,10 @@ func (h *handler) auth(next http.Handler) http.Handler {
 		}
 		user, err := h.app.Authenticate(r.Context(), strings.TrimPrefix(value, "Bearer "))
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				respondError(w, err)
+				return
+			}
 			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid bearer token", "")
 			return
 		}
@@ -589,6 +593,10 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 func respondError(w http.ResponseWriter, err error) {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		writeError(w, http.StatusServiceUnavailable, "CALCULATION_TIMEOUT", "request exceeded the processing deadline", "")
+		return
+	}
 	var typed *domain.DomainError
 	if errors.As(err, &typed) {
 		status := http.StatusBadRequest
@@ -611,6 +619,13 @@ func respondError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error", "")
+}
+func requestDeadline(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 func writeError(w http.ResponseWriter, status int, code, message, field string) {
 	details := []any{}
