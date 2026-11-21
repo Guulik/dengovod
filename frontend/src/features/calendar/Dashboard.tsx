@@ -4,7 +4,7 @@ import type { DayCellContentArg, DatesSetArg } from '@fullcalendar/core'
 import { endOfMonth, format, parseISO, startOfMonth, subDays } from 'date-fns'
 import { ru } from 'date-fns/locale'
 import { CalendarDays, Clock3, Coins, Plus, TrendingUp, X } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { ApiError, errorMessage } from '../../api/client'
 import { useBalance, useCalendar, useForecast } from '../../api/hooks'
 import type { CalendarDay, Money } from '../../api/schemas'
@@ -20,6 +20,8 @@ import { BalanceModal } from '../balance/BalanceModal'
 import { HorizonModal } from '../settings/HorizonModal'
 import { SettingsModal } from '../settings/SettingsModal'
 import { OccurrenceCard } from './OccurrenceCard'
+import { DayCostEditor } from './DayCostEditor'
+import { useFinancialDateRefresh } from '../../api/useFinancialDateRefresh'
 
 function StatCard({
   label,
@@ -52,9 +54,9 @@ function StatCard({
   )
 }
 
-function DayCell({ arg, day }: { arg: DayCellContentArg; day?: CalendarDay }) {
+function DayCell({ arg, day, currentDate }: { arg: DayCellContentArg; day?: CalendarDay; currentDate: string }) {
   const setSelectedDate = useUIStore((state) => state.setSelectedDate)
-  const isToday = toApiDate(arg.date) === today()
+  const isToday = toApiDate(arg.date) === currentDate
   return (
     <button type="button" aria-label={`Открыть ${formatDate(toApiDate(arg.date))}`} onClick={() => setSelectedDate(toApiDate(arg.date))} className="flex min-h-[4.5rem] w-full flex-col p-1 text-left focus-visible:outline-2 focus-visible:outline-teal-700 sm:min-h-[5.25rem]">
       <span className={isToday ? 'grid size-6 place-items-center rounded-full bg-teal-800 text-xs font-bold text-white' : 'text-xs font-bold text-stone-500'}>{arg.dayNumberText}</span>
@@ -80,16 +82,20 @@ function DayCell({ arg, day }: { arg: DayCellContentArg; day?: CalendarDay }) {
   )
 }
 
-function CalendarView({ days, onRange }: { days: CalendarDay[]; onRange: (from: string, to: string) => void }) {
+function CalendarView({ days, onRange, currentDate }: { days: CalendarDay[]; onRange: (from: string, to: string) => void; currentDate: string }) {
   const byDate = useMemo(() => new Map(days.map((day) => [day.date, day])), [days])
-  const [initialDate] = useState(today)
-  const datesSet = useCallback((info: DatesSetArg) => onRange(toApiDate(info.start), toApiDate(subDays(info.end, 1))), [onRange])
+  const visibleMonth = useRef(currentDate)
+  const datesSet = useCallback((info: DatesSetArg) => {
+    visibleMonth.current = toApiDate(info.view.currentStart)
+    onRange(toApiDate(info.start), toApiDate(subDays(info.end, 1)))
+  }, [onRange])
   return (
     <div className="money-calendar overflow-hidden rounded-3xl border border-white/80 bg-[#fcfbf8] p-2 shadow-sm sm:p-4">
       <FullCalendar
+        key={currentDate}
         plugins={[dayGridPlugin]}
         initialView="dayGridMonth"
-        initialDate={initialDate}
+        initialDate={visibleMonth.current}
         now={moscowDateTime}
         firstDay={1}
         fixedWeekCount={false}
@@ -98,7 +104,7 @@ function CalendarView({ days, onRange }: { days: CalendarDay[]; onRange: (from: 
         buttonText={{ today: 'Сегодня' }}
         titleFormat={(arg) => format(parseISO(`${String(arg.date.year).padStart(4, '0')}-${String(arg.date.month + 1).padStart(2, '0')}-01`), 'LLLL yyyy', { locale: ru })}
         datesSet={datesSet}
-        dayCellContent={(arg) => <DayCell arg={arg} day={byDate.get(toApiDate(arg.date))} />}
+        dayCellContent={(arg) => <DayCell arg={arg} day={byDate.get(toApiDate(arg.date))} currentDate={currentDate} />}
       />
       <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-stone-100 px-2 pt-3 text-[11px] text-stone-500">
         <span><strong className="text-stone-400">Б</strong> — баланс на конец дня</span>
@@ -131,6 +137,8 @@ function DayDetail({ day }: { day?: CalendarDay }) {
         <div className="rounded-2xl bg-stone-100 p-3"><p className="text-xs text-stone-500">Стоимость дня</p><p className="mt-1 font-black">{day ? formatMoney(day.day_cost) : '—'}</p></div>
         <div className="rounded-2xl bg-stone-100 p-3"><p className="text-xs text-stone-500">Доходы</p><p className="mt-1 font-black">{day ? formatMoney(day.income_total) : '—'}</p></div>
       </div>
+      <p className="mt-3 text-xs text-stone-500">Стоимость дня учитывается в прогнозе к вечеру, а после завершения дня — в текущем балансе. Повседневные расходы уменьшают её неиспользованную часть.</p>
+      <DayCostEditor key={selectedDate} date={selectedDate} currentCost={day?.day_cost} />
       <div className="mt-6 flex items-center justify-between">
         <h3 className="font-bold">События</h3>
         <Button variant="secondary" className="min-h-9 px-3 py-1" onClick={() => openEvent()}><Plus size={15} />Добавить</Button>
@@ -164,7 +172,7 @@ function Summary({
         tone="accent"
         hint={`Прогноз на ${formatDate(forecast.horizon_date)} с учётом доходов и расходов`}
       />
-      <StatCard label="Текущий баланс" value={formatMoney(balance)} icon={<Coins size={18} />} onClick={onEditBalance} />
+      <StatCard label="Текущий баланс" value={formatMoney(balance)} icon={<Coins size={18} />} onClick={onEditBalance} hint="Расчётный остаток: сверка, подтверждённые операции и стоимость завершённых дней" />
       <StatCard
         label="До горизонта"
         value={`${forecast.days_until_horizon} дн.`}
@@ -177,6 +185,7 @@ function Summary({
 }
 
 export function Dashboard() {
+  const currentDate = useFinancialDateRefresh()
   const [range, setRange] = useState(() => {
     const now = parseISO(today())
     return { from: toApiDate(startOfMonth(now)), to: toApiDate(endOfMonth(now)) }
@@ -226,7 +235,7 @@ export function Dashboard() {
             />
         )}
         <div className={`mt-5 grid gap-5 ${selectedDate ? 'lg:grid-cols-[minmax(0,1fr)_360px]' : ''}`}>
-          <CalendarView days={calendar.data?.days ?? []} onRange={onRange} />
+          <CalendarView days={calendar.data?.days ?? []} onRange={onRange} currentDate={currentDate} />
           <DayDetail day={selectedDay} />
         </div>
       </main>

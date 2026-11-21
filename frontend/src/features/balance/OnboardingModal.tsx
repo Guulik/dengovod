@@ -57,7 +57,7 @@ export function OnboardingModal({ open, onClose }: { open: boolean; onClose?: ()
         <Field label="Текущий баланс, ₽" error={errors.balance?.message} hint="Сколько денег доступно прямо сейчас">
           <Input inputMode="decimal" placeholder="85 000" autoFocus {...register('balance')} />
         </Field>
-        <Field label="Базовая стоимость дня, ₽" error={errors.dayCost?.message} hint="Обычные ежедневные расходы: еда, транспорт, мелочи">
+        <Field label="Базовая стоимость дня, ₽" error={errors.dayCost?.message} hint="Оценка повседневных расходов. После окончания дня её неиспользованная часть уменьшит расчётный остаток. Ноль — без ежедневных расходов.">
           <Input inputMode="decimal" placeholder="1 500" {...register('dayCost')} />
         </Field>
         <Field label="Горизонт планирования" error={errors.horizonPolicy?.message} hint="До какой даты считать обязательные расходы и дневные траты">
