@@ -264,9 +264,13 @@ func TestBusinessLegacyReviewFlagAndSalaryIdentityThroughAPI(t *testing.T) {
 		var amount struct {
 			Amount int64 `json:"amount"`
 		}
-		if err := json.Unmarshal(balance["computed_balance"], &amount); err != nil || amount.Amount != 1_100_000 {
+		wantBalance := int64(1_075_000) // DV-8: completed July 10 override costs 25000.
+		if attempt == 1 {
+			wantBalance = 1_100_000 // The new July 11 reconciliation resets prior days.
+		}
+		if err := json.Unmarshal(balance["computed_balance"], &amount); err != nil || amount.Amount != wantBalance {
 			store.Close()
-			t.Fatalf("legacy plans/reserve changed reconciled actual balance: %s, err %v", balance["computed_balance"], err)
+			t.Fatalf("legacy estimated balance: got %s, want %d, err %v", balance["computed_balance"], wantBalance, err)
 		}
 		categories := call(http.MethodGet, "/categories", "", http.StatusOK)
 		var items []struct {
@@ -344,9 +348,9 @@ INSERT INTO actual_transactions VALUES ('80000000-0000-4000-8000-000000000002','
 		app := service.New(store)
 		app.Now = func() time.Time { return time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC) }
 		balance, err := app.GetBalance(context.Background(), uuid.MustParse("10000000-0000-4000-8000-000000000001"))
-		if err != nil || balance.ComputedBalance.Amount != 1_170_000 {
+		if err != nil || balance.ComputedBalance.Amount != 1_145_000 {
 			store.Close()
-			t.Fatalf("legacy balance on open %d: got %+v, err=%v, want 1170000 (equal-time fact absorbed)", attempt+1, balance, err)
+			t.Fatalf("legacy balance on open %d: got %+v, err=%v, want 1145000 (equal-time fact absorbed, completed July 10 cost deducted)", attempt+1, balance, err)
 		}
 		if err := store.Close(); err != nil {
 			t.Fatal(err)
