@@ -132,11 +132,11 @@ func TestMoneyForLifeSeparatesOptionalPlansAtHorizon(t *testing.T) {
 	}
 }
 
-func TestAnchorDayCostBeginsNextCalendarDay(t *testing.T) {
+func TestCompletedAnchorDayCostAffectsCurrentAndNextProjection(t *testing.T) {
 	input := baseInput("2026-07-11T09:00:00Z", "2026-07-10T08:00:00Z", 1_000, 100, domain.HorizonCustomDate, "2026-07-11")
 	input.RangeFrom, input.RangeTo = date("2026-07-10"), date("2026-07-11")
 	output := Calculate(input)
-	if len(output.Days) != 2 || output.Days[0].ExpectedBalance.Amount != 1_000 || output.Days[1].ExpectedBalance.Amount != 900 {
+	if len(output.Days) != 2 || output.Days[0].ExpectedBalance.Amount != 900 || output.Days[1].ExpectedBalance.Amount != 800 || output.Summary.CurrentBalance.Amount != 900 {
 		t.Fatalf("unexpected projections: %+v", output.Days)
 	}
 }
@@ -157,14 +157,14 @@ func TestAnchorDayEventsAffectNextDayBalance(t *testing.T) {
 	if len(output.Days) != 2 {
 		t.Fatalf("unexpected day count: %+v", output.Days)
 	}
-	if output.Days[0].ExpectedBalance.Amount != 18_700 {
-		t.Fatalf("anchor-day balance: got %d want 18700", output.Days[0].ExpectedBalance.Amount)
+	if output.Days[0].ExpectedBalance.Amount != 18_300 {
+		t.Fatalf("anchor-day balance: got %d want 18300", output.Days[0].ExpectedBalance.Amount)
 	}
-	if output.Days[1].ExpectedBalance.Amount != 18_300 {
-		t.Fatalf("next-day balance: got %d want 18300", output.Days[1].ExpectedBalance.Amount)
+	if output.Days[1].ExpectedBalance.Amount != 17_900 {
+		t.Fatalf("next-day balance: got %d want 17900", output.Days[1].ExpectedBalance.Amount)
 	}
-	if output.Summary.CurrentBalance.Amount != 18_700 {
-		t.Fatalf("current factual balance: got %d want 18700", output.Summary.CurrentBalance.Amount)
+	if output.Summary.CurrentBalance.Amount != 18_300 {
+		t.Fatalf("current estimated balance: got %d want 18300", output.Summary.CurrentBalance.Amount)
 	}
 }
 

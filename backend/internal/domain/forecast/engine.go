@@ -74,7 +74,7 @@ func DayCost(date domain.CalendarDate, settings domain.UserSettings, overrides [
 		if date.Before(o.DateFrom) || date.After(o.DateTo) {
 			continue
 		}
-		if latest == nil || o.CreatedAt.After(latest.CreatedAt) || (o.CreatedAt.Equal(latest.CreatedAt) && o.ID.String() > latest.ID.String()) {
+		if latest == nil || o.Priority > latest.Priority || (o.Priority == latest.Priority && (o.CreatedAt.After(latest.CreatedAt) || (o.CreatedAt.Equal(latest.CreatedAt) && o.ID.String() > latest.ID.String()))) {
 			latest = o
 		}
 	}
@@ -348,13 +348,21 @@ func CalculateContext(ctx context.Context, input Input) (Output, error) {
 		}
 	}
 	output.Anchor = currentAnchor
+	if currentAnchor != nil {
+		current, err = estimateThrough(ctx, input, current, currentAnchor, today.AddDays(-1))
+		if err != nil {
+			return Output{}, err
+		}
+	}
 	var actual int64
 	known := false
+	var historicalAnchor *domain.BalanceAnchor
 	pointIndex := 0
 	apply := func(p ledgerPoint) error {
 		if p.anchor != nil {
 			actual = p.amount
 			known = true
+			historicalAnchor = p.anchor
 		} else if known {
 			var err error
 			actual, err = domain.AddMoney(actual, p.amount)
@@ -451,7 +459,11 @@ func CalculateContext(ctx context.Context, input Input) (Output, error) {
 		}
 		if d.Before(today) {
 			if known {
-				day.projection.ExpectedBalance = moneyPtr(actual)
+				estimated, err := estimateThrough(ctx, input, actual, historicalAnchor, d)
+				if err != nil {
+					return Output{}, err
+				}
+				day.projection.ExpectedBalance = moneyPtr(estimated)
 			}
 		} else if currentAnchor != nil {
 			for _, delta := range []int64{day.planIncome, -day.planRequired, -day.planOptional, -day.reserve} {

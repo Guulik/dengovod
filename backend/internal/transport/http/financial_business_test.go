@@ -137,9 +137,9 @@ func TestBusinessIncomePlanConfirmationAndNextDayCarry(t *testing.T) {
 	businessMoney(t, days[0], "expected_balance", 1_830_000)
 	businessMoney(t, days[1], "expected_balance", 1_790_000)
 	api.at("2026-07-12T12:00:00Z")
-	api.balance(token, 1_870_000)
+	api.balance(token, 1_830_000) // DV-8: July 11 is now a completed day.
 	days = api.days(token, "2026-07-12", "2026-07-12")
-	businessMoney(t, days[0], "expected_balance", 1_830_000)
+	businessMoney(t, days[0], "expected_balance", 1_790_000)
 }
 
 func TestBusinessExactAnchorBoundaryUsesLedgerOrder(t *testing.T) {
@@ -400,10 +400,10 @@ func TestBusinessDayCostHistoryAndOverridePriority(t *testing.T) {
 	businessMoney(t, days[0], "day_cost", 40_000)
 	businessMoney(t, days[1], "day_cost", 60_000)
 	businessMoney(t, days[2], "day_cost", 25_000)
-	api.balance(token, 1_000_000)
+	api.balance(token, 960_000) // DV-8: July 10 uses its historical 40000 cost.
 	forecast := api.call(http.MethodGet, "/forecast", token, nil, http.StatusOK)
 	businessMoney(t, forecast, "day_cost_remaining", 85_000)
-	businessMoney(t, forecast, "money_for_life", 915_000)
+	businessMoney(t, forecast, "money_for_life", 875_000)
 }
 
 func TestBusinessUndoFactAfterRecurrenceEditDoesNotInventPlan(t *testing.T) {
@@ -573,10 +573,10 @@ func TestBusinessInclusiveMonthEndAndExpiredCustomHorizon(t *testing.T) {
 	}
 	api.settings(token, 40_000, "CUSTOM_DATE", "2026-07-31")
 	api.at("2026-08-01T12:00:00Z")
-	api.balance(token, 1_000_000)
+	api.balance(token, 920_000) // DV-8: July 30 and 31 have both completed.
 	forecast = api.call(http.MethodGet, "/forecast", token, nil, http.StatusOK)
 	businessMoney(t, forecast, "day_cost_remaining", 0)
-	businessMoney(t, forecast, "money_for_life", 1_000_000)
+	businessMoney(t, forecast, "money_for_life", 920_000)
 	if got := businessField[int](t, forecast, "days_until_horizon"); got != 0 {
 		t.Fatalf("expired custom horizon creates a nonzero period: %d", got)
 	}
@@ -658,23 +658,30 @@ func TestBusinessEqualTimeOverridesAreStableAcrossReadsAndReopen(t *testing.T) {
 	token := api.login("business-override-tie")
 	api.settings(token, 40_000, "CUSTOM_DATE", "2026-07-12")
 	api.anchor(token, 1_000_000, "2026-07-11T08:00:00Z")
-	for _, amount := range []int64{25_000, 15_000} {
-		api.call(http.MethodPost, "/day-cost-overrides", token, map[string]any{
-			"date_from": "2026-07-11", "date_to": "2026-07-11", "daily_amount": map[string]any{"amount": amount, "currency": "RUB"},
+	var firstID string
+	for i, amount := range []int64{25_000, 15_000} {
+		from, to := "2026-07-11", "2026-07-11"
+		if i == 0 {
+			from, to = "2026-07-10", "2026-07-12"
+		}
+		created := api.call(http.MethodPost, "/day-cost-overrides", token, map[string]any{
+			"date_from": from, "date_to": to, "daily_amount": map[string]any{"amount": amount, "currency": "RUB"},
 		}, http.StatusCreated)
+		if i == 0 {
+			firstID = businessField[string](t, created, "id")
+		}
 	}
 	day := api.days(token, "2026-07-11", "2026-07-11")[0]
 	amount := businessField[map[string]json.RawMessage](t, day, "day_cost")
 	winner := businessField[int64](t, amount, "amount")
-	// The contract requires a stable tie-break, without prescribing which tied
-	// override wins. Base cost is never a valid result while either applies.
-	if winner != 25_000 && winner != 15_000 {
-		t.Fatalf("tied overrides did not override base cost: %d", winner)
+	// DV-8: persistent overrides use creation order, even at the same Now.
+	if winner != 15_000 {
+		t.Fatalf("later-created override did not win at the same timestamp: %d", winner)
 	}
 	for i := 0; i < 3; i++ {
 		days := api.days(token, "2026-07-10", "2026-07-12")
 		businessMoney(t, days[1], "day_cost", winner)
-		businessMoney(t, days[2], "day_cost", 40_000)
+		businessMoney(t, days[2], "day_cost", 25_000)
 	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
@@ -682,10 +689,21 @@ func TestBusinessEqualTimeOverridesAreStableAcrossReadsAndReopen(t *testing.T) {
 	api, store = persistentBusinessAPI(t, path, &now)
 	day = api.days(token, "2026-07-11", "2026-07-11")[0]
 	businessMoney(t, day, "day_cost", winner)
-	api.at("2026-07-11T13:00:00Z")
+	api.call(http.MethodPut, "/day-cost-overrides/"+firstID, token, map[string]any{
+		"date_from": "2026-07-10", "date_to": "2026-07-12", "daily_amount": map[string]any{"amount": 12_000, "currency": "RUB"},
+	}, http.StatusOK)
+	day = api.days(token, "2026-07-11", "2026-07-11")[0]
+	businessMoney(t, day, "day_cost", winner) // PUT must not increase priority.
+	api.at("2026-07-11T11:00:00Z")            // A new POST wins even after clock rollback.
 	api.call(http.MethodPost, "/day-cost-overrides", token, map[string]any{
 		"date_from": "2026-07-11", "date_to": "2026-07-11", "daily_amount": map[string]any{"amount": 10_000, "currency": "RUB"},
 	}, http.StatusCreated)
+	day = api.days(token, "2026-07-11", "2026-07-11")[0]
+	businessMoney(t, day, "day_cost", 10_000)
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	api, store = persistentBusinessAPI(t, path, &now)
 	day = api.days(token, "2026-07-11", "2026-07-11")[0]
 	businessMoney(t, day, "day_cost", 10_000)
 	if err := store.Close(); err != nil {
@@ -841,10 +859,18 @@ func TestBusinessLaterAnchorDiscardsOverflowingReserveInEveryCalendarRange(t *te
 		"daily_amount": map[string]any{"amount": int64(9_007_199_254_740_991), "currency": "RUB"},
 	}, http.StatusCreated)
 	api.anchor(token, 20_000, "2026-07-11T08:00:00Z")
-	full := api.call(http.MethodGet, "/calendar?from=2026-07-01&to=2026-07-11", token, nil, http.StatusOK)
+	// DV-8 makes completed daily costs part of historical end balances. The
+	// full history now legitimately overflows from July 3 onward, before the
+	// later anchor. A representable visible range must still have stable MFL.
+	overflow := api.call(http.MethodGet, "/calendar?from=2026-07-01&to=2026-07-11", token, nil, http.StatusConflict)
+	problem := businessField[map[string]json.RawMessage](t, overflow, "error")
+	if code := businessField[string](t, problem, "code"); code != "CALCULATION_OVERFLOW" {
+		t.Fatalf("historical completed-cost overflow: %q", code)
+	}
+	full := api.call(http.MethodGet, "/calendar?from=2026-07-01&to=2026-07-02", token, nil, http.StatusOK)
 	fullDays := businessField[[]map[string]json.RawMessage](t, full, "days")
-	if len(fullDays) != 11 {
-		t.Fatalf("full calendar returned %d days, want 11", len(fullDays))
+	if len(fullDays) != 2 {
+		t.Fatalf("representable calendar returned %d days, want 2", len(fullDays))
 	}
 	businessMoney(t, fullDays[0], "money_for_life", 20_000)
 	short := api.call(http.MethodGet, "/calendar?from=2026-07-01&to=2026-07-01", token, nil, http.StatusOK)
@@ -866,5 +892,41 @@ func TestBusinessLaterAnchorDiscardsOverflowingReserveInEveryCalendarRange(t *te
 	}
 	if !bytes.Equal(full["summary"], short["summary"]) {
 		t.Fatalf("visible range changed summary: full=%s short=%s", full["summary"], short["summary"])
+	}
+
+	// A separate, fully representable history preserves the original full
+	// July 1..11 versus July 1 comparison under the DV-8 daily-cost model.
+	safeAPI := newBusinessAPI(t)
+	safeToken := safeAPI.login("business-anchor-resets-representable-gap")
+	safeAPI.settings(safeToken, 0, "CUSTOM_DATE", "2026-07-11")
+	safeAPI.anchor(safeToken, 10_000, "2026-07-01T08:00:00Z")
+	safeAPI.call(http.MethodPost, "/day-cost-overrides", safeToken, map[string]any{
+		"date_from": "2026-07-02", "date_to": "2026-07-10",
+		"daily_amount": map[string]any{"amount": 100, "currency": "RUB"},
+	}, http.StatusCreated)
+	safeAPI.anchor(safeToken, 20_000, "2026-07-11T08:00:00Z")
+	safeFull := safeAPI.call(http.MethodGet, "/calendar?from=2026-07-01&to=2026-07-11", safeToken, nil, http.StatusOK)
+	safeFullDays := businessField[[]map[string]json.RawMessage](t, safeFull, "days")
+	if len(safeFullDays) != 11 {
+		t.Fatalf("representable full calendar returned %d days, want 11", len(safeFullDays))
+	}
+	businessMoney(t, safeFullDays[0], "money_for_life", 20_000)
+	businessMoney(t, safeFullDays[9], "expected_balance", 9_100)
+	safeShort := safeAPI.call(http.MethodGet, "/calendar?from=2026-07-01&to=2026-07-01", safeToken, nil, http.StatusOK)
+	safeShortDays := businessField[[]map[string]json.RawMessage](t, safeShort, "days")
+	if len(safeShortDays) != 1 {
+		t.Fatalf("representable short calendar returned %d days, want 1", len(safeShortDays))
+	}
+	businessMoney(t, safeShortDays[0], "money_for_life", 20_000)
+	safeFullDay, err := json.Marshal(safeFullDays[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	safeShortDay, err := json.Marshal(safeShortDays[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(safeFullDay, safeShortDay) || !bytes.Equal(safeFull["summary"], safeShort["summary"]) {
+		t.Fatalf("representable full/short history differs: full day=%s short day=%s full summary=%s short summary=%s", safeFullDay, safeShortDay, safeFull["summary"], safeShort["summary"])
 	}
 }

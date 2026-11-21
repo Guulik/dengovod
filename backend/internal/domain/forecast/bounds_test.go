@@ -56,11 +56,11 @@ func TestAncientKnownHistoryUsesSparseReserveIntegration(t *testing.T) {
 	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 8<<20 {
 		t.Fatalf("sparse known history allocated %d bytes", allocated)
 	}
-	want := int64(1000000) - domain.DaysBetween(input.RangeFrom, date("2026-07-12"))
-	if len(output.Days) != 1 || output.Days[0].ExpectedBalance.Amount != 1000000 || output.Days[0].MoneyForLife.Amount != want {
+	want := int64(1000000) - domain.DaysBetween(input.RangeFrom, date("2026-07-12")) - 1
+	if len(output.Days) != 1 || output.Days[0].ExpectedBalance.Amount != 999999 || output.Days[0].MoneyForLife.Amount != want {
 		t.Fatalf("sparse historical MFL: %+v, want %d", output.Days, want)
 	}
-	if output.Summary.MoneyForLife.Amount != 999998 {
+	if output.Summary.MoneyForLife.Amount != want {
 		t.Fatalf("current summary reserved invisible history: %+v", output.Summary)
 	}
 }
@@ -109,9 +109,11 @@ func TestSparseGapBeforeSuffixResetDoesNotOverflowDiscardedReserve(t *testing.T)
 	input.Overrides = []domain.DayCostOverride{{
 		ID: uuid.New(), DateFrom: date("2026-07-02"), DateTo: date("2026-07-10"), DailyAmount: domain.Rub(domain.MaxMoney),
 	}}
-	full, err := CalculateContext(context.Background(), input)
-	if err != nil {
-		t.Fatal(err)
+	// DV-8 makes completed costs part of the displayed historical balances.
+	// Requesting these unrepresentable days must fail; a short window before
+	// them still has a representable MFL reset by the later reconciliation.
+	if _, err := CalculateContext(context.Background(), input); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("overflowing displayed history accepted: %v", err)
 	}
 	input.RangeTo = input.RangeFrom
 	short, err := CalculateContext(context.Background(), input)
@@ -121,8 +123,8 @@ func TestSparseGapBeforeSuffixResetDoesNotOverflowDiscardedReserve(t *testing.T)
 	if len(short.Days) != 1 || short.Days[0].ExpectedBalance.Amount != 10000 || short.Days[0].MoneyForLife.Amount != 20000 {
 		t.Fatalf("unexpected short historical projection: %+v", short.Days)
 	}
-	if *short.Days[0].ExpectedBalance != *full.Days[0].ExpectedBalance || *short.Days[0].MoneyForLife != *full.Days[0].MoneyForLife || *short.Summary != *full.Summary {
-		t.Fatalf("short and contiguous ranges disagree: short=%+v full=%+v", short, full)
+	if short.Summary.CurrentBalance.Amount != 20000 || short.Summary.MoneyForLife.Amount != 20000 {
+		t.Fatalf("old discarded estimates changed current segment: %+v", short.Summary)
 	}
 }
 

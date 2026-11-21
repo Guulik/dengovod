@@ -86,7 +86,8 @@ func (a *App) GetBalance(ctx context.Context, userID uuid.UUID) (domain.BalanceS
 		return domain.BalanceState{}, err
 	}
 	now := a.Now().UTC()
-	amount, anchor, err := forecast.ActualBalance(ctx, forecast.Input{Anchors: snapshot.Anchors, Occurrences: snapshot.Occurrences, LegacyFacts: snapshot.LegacyFacts, AsOf: now})
+	amount, anchor, err := forecast.EstimatedBalance(ctx, forecast.Input{Anchors: snapshot.Anchors, Occurrences: snapshot.Occurrences, LegacyFacts: snapshot.LegacyFacts,
+		Settings: snapshot.Settings, Overrides: snapshot.Overrides, DayCosts: snapshot.DayCosts, AsOf: now})
 	if err != nil {
 		return domain.BalanceState{}, err
 	}

@@ -35,7 +35,7 @@ export function BalanceModal() {
     <Modal open={open} onClose={() => setBalanceOpen(false)} title="Текущий баланс">
       <div className="space-y-4">
         <p className="text-sm text-stone-600">
-          Укажите, сколько денег у вас сейчас. Прогноз и «деньги на жизнь» пересчитаются от этой точки.
+          Текущий баланс — расчётный остаток с учётом подтверждённых операций и стоимости завершённых дней. Сверьте его с деньгами на счетах и укажите реальную сумму сейчас: дальнейший расчёт начнётся от этой точки.
         </p>
         {balance && (
           <div className="rounded-2xl bg-stone-100 p-4 text-sm">

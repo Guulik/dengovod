@@ -334,7 +334,7 @@ func (s *Store) DeleteOverride(ctx context.Context, userID, id uuid.UUID) error 
 func scanOverride(row scanner) (domain.DayCostOverride, error) {
 	var value domain.DayCostOverride
 	var from, to string
-	err := row.Scan(&value.ID, &value.UserID, &from, &to, &value.DailyAmount.Amount, &value.Comment, &value.CreatedAt)
+	err := row.Scan(&value.ID, &value.UserID, &from, &to, &value.DailyAmount.Amount, &value.Comment, &value.CreatedAt, &value.Priority)
 	if err != nil {
 		return value, normalize(err)
 	}
@@ -346,7 +346,7 @@ func scanOverride(row scanner) (domain.DayCostOverride, error) {
 	return value, err
 }
 
-const overrideSelect = `SELECT id,user_id,date_from,date_to,daily_amount,comment,created_at FROM day_cost_overrides`
+const overrideSelect = `SELECT id,user_id,date_from,date_to,daily_amount,comment,created_at,rowid FROM day_cost_overrides`
 
 func (s *Store) GetOverride(ctx context.Context, userID, id uuid.UUID) (domain.DayCostOverride, error) {
 	return scanOverride(s.db.QueryRowContext(ctx, overrideSelect+` WHERE id=? AND user_id=?`, id, userID))

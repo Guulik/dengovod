@@ -83,7 +83,7 @@ export function SettingsModal() {
           <form className="grid content-start gap-5" onSubmit={(event) => void submitSettings(event).catch(() => undefined)}>
             <div>
               <h3 className="font-bold">Основные параметры</h3>
-              <p className="mt-1 text-sm text-stone-500">Используются для ежедневного прогноза.</p>
+              <p className="mt-1 text-sm text-stone-500">Стоимость завершённых дней автоматически уменьшает расчётный остаток. Новая базовая стоимость действует с сегодняшнего дня; отдельную дату можно изменить в календаре.</p>
             </div>
             <Field label="Базовая стоимость дня, ₽">
               <Input inputMode="decimal" value={dayCost} onChange={(event) => setDayCost(event.target.value)} />
