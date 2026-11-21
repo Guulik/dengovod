@@ -7,6 +7,29 @@ import (
 	"github.com/alshatilov/dengovod/backend/internal/domain"
 )
 
+// EstimatedBalance keeps the stored ledger intact and subtracts only the
+// unspent budgets of completed Moscow days since the latest reconciliation.
+// Today's budget belongs to the forecast until the next local midnight.
+func EstimatedBalance(ctx context.Context, input Input) (domain.Money, *domain.BalanceAnchor, error) {
+	raw, anchor, err := ActualBalance(ctx, input)
+	if err != nil {
+		return domain.Money{}, nil, err
+	}
+	amount, err := estimateThrough(ctx, input, raw.Amount, anchor, domain.DateFromTime(input.AsOf).AddDays(-1))
+	if err != nil {
+		return domain.Money{}, nil, err
+	}
+	return domain.Rub(amount), anchor, nil
+}
+
+func estimateThrough(ctx context.Context, input Input, raw int64, anchor *domain.BalanceAnchor, through domain.CalendarDate) (int64, error) {
+	reserve, err := reserveBetween(ctx, input, domain.DateFromTime(anchor.AnchoredAt), through)
+	if err != nil {
+		return 0, err
+	}
+	return domain.AddMoney(raw, -reserve)
+}
+
 // historicalGap represents invisible past days without expanding recurrences
 // or walking calendar days. Overdue plans have no financial effect. A control
 // point resets earlier effects; remaining reserve is integrated between the

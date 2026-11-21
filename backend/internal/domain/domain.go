@@ -159,6 +159,7 @@ type DayCostOverride struct {
 	DailyAmount Money
 	Comment     string
 	CreatedAt   time.Time
+	Priority    int64
 }
 type EventOccurrence struct {
 	EventID               uuid.UUID
